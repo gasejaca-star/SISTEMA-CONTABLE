@@ -218,5 +218,6 @@ if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
 
         st.success("¡Reporte generado!")
 
-        st.download_button("📥 DESCARGAR EXCEL", output.getvalue(), f"Qusky_{datetime.now().strftime('%H%M%S')}.xlsx")
+        st.download_button("📥 DESCARGAR EXCEL", output.getvalue(), f"RAPIDITO_{datetime.now().strftime('%H%M%S')}.xlsx")
+
 
