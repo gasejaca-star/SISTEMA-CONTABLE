@@ -9,7 +9,7 @@ from datetime import datetime
 import xlsxwriter
 
 # --- 1. CONFIGURACIÓN Y SEGURIDAD ---
-st.set_page_config(page_title="QUSKY AI - Portal Contable", layout="wide", page_icon="📊")
+st.set_page_config(page_title="RAPIDITO - Portal Contable", layout="wide", page_icon="📊")
 
 # Reemplaza con tu link de "Publicar en la web" como CSV
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
@@ -138,7 +138,7 @@ def extraer_datos_robusto(xml_file):
         return None
 
 # --- 5. INTERFAZ PRINCIPAL ---
-st.title(f"🚀 QUSKY AI - Bienvido, {st.session_state.usuario_actual}")
+st.title(f"🚀 RAPIDITO - Bienvido, {st.session_state.usuario_actual}")
 
 with st.sidebar:
     if st.button("Cerrar Sesión"):
@@ -219,3 +219,4 @@ if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
         st.success("¡Reporte generado!")
 
         st.download_button("📥 DESCARGAR EXCEL", output.getvalue(), f"Qusky_{datetime.now().strftime('%H%M%S')}.xlsx")
+
