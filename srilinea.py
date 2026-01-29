@@ -43,9 +43,9 @@ if not st.session_state.autenticado:
             st.session_state.usuario_actual = user
             st.rerun()
         else:
-            st.sidebar.error("Usuario no encontrado o inactivo.")
+            st.sidebar.error("Acceso denegado.")
     
-    st.info("### Bienvenido a RAPIDITO AI\nPor favor, ingresa tus credenciales para comenzar.")
+    st.info("### Bienvenido a RAPIDITO\nIngresa tus credenciales para continuar.")
     st.stop()
 
 # --- 3. MEMORIA DE APRENDIZAJE ---
@@ -60,103 +60,87 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN MEJORADO (SOLUCIÓN AL ERROR) ---
+# --- 4. MOTOR DE EXTRACCIÓN XML (TU LÓGICA EXACTA) ---
 def extraer_datos_robusto(xml_file):
     try:
-        content = xml_file.read()
-        try:
-            tree = ET.fromstring(content)
-        except:
-            # Reintento por si el archivo tiene caracteres extraños
-            tree = ET.fromstring(content.decode('utf-8', errors='ignore'))
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        xml_data = None
+        tipo_doc = "FC"
         
-        # 1. Extraer el bloque del comprobante (el SRI suele meter el XML dentro de otro XML)
-        comprobante_node = tree.find("comprobante")
-        if comprobante_node is not None:
-            # Limpieza de CDATA y etiquetas de versión
-            raw_xml = comprobante_node.text
-            raw_xml = re.sub(r'<\?xml.*?\?>', '', raw_xml)
-            data_root = ET.fromstring(raw_xml)
-        else:
-            data_root = tree
-
-        # 2. Identificar Tipo de Documento
-        tipo_doc = "FC" # Por defecto Factura
-        tag_root = data_root.tag.lower()
-        if 'notacredito' in tag_root: tipo_doc = "NC"
-        elif 'liquidacioncompra' in tag_root: tipo_doc = "LC"
-
-        # 3. Función de búsqueda inteligente
-        def buscar(path):
-            elem = data_root.find(f".//{path}")
-            return elem.text.strip() if elem is not None and elem.text else None
-
-        # 4. Datos Básicos
-        fecha = buscar("fechaEmision")
-        ruc_emisor = buscar("ruc")
-        nombre_emisor = (buscar("razonSocial") or "DESCONOCIDO").upper()
-        n_factura = f"{buscar('estab')}-{buscar('ptoEmi')}-{buscar('secuencial')}"
-
-        # 5. Lógica de Impuestos (El corazón del error)
-        # Buscamos todas las etiquetas de impuestos para no perder bases
-        total_sin_imp = float(buscar("totalSinImpuestos") or 0)
-        importe_total = float(buscar("importeTotal") or buscar("valorModificado") or 0)
+        for elem in root.iter():
+            tag_lower = elem.tag.lower()
+            if 'notacredito' in tag_lower: tipo_doc = "NC"
+            elif 'liquidacioncompra' in tag_lower: tipo_doc = "LC"
+            if 'comprobante' in tag_lower and elem.text:
+                try:
+                    clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
+                    xml_data = ET.fromstring(clean_text)
+                    break
+                except: continue
         
-        base_0, base_iva, valor_iva = 0.0, 0.0, 0.0
-        ice = 0.0
+        if xml_data is None: xml_data = root
 
-        for impuesto in data_root.findall(".//totalImpuesto"):
-            codigo = impuesto.find("codigo").text if impuesto.find("codigo") is not None else ""
-            porcentaje = impuesto.find("codigoPorcentaje").text if impuesto.find("codigoPorcentaje") is not None else ""
-            base = float(impuesto.find("baseImponible").text or 0)
-            valor = float(impuesto.find("valor").text or 0)
+        def buscar(tags):
+            for t in tags:
+                f = xml_data.find(f".//{t}")
+                if f is not None and f.text: return f.text
+            return "0"
 
-            if codigo == "2": # IVA
-                if porcentaje == "0":
-                    base_0 += base
-                else: # 12%, 14%, 15%, etc.
-                    base_iva += base
-                    valor_iva += valor
-            elif codigo == "3": # ICE
-                ice += valor
-
-        # Cálculo de "NO IVA" (Diferencia contable)
-        no_iva = round(importe_total - (total_sin_imp + valor_iva + ice), 2)
-        if abs(no_iva) < 0.05: no_iva = 0.0 # Ignorar decimales de redondeo
-
-        # Multiplicador para Notas de Crédito
+        total = float(buscar(["importeTotal", "valorModificado", "total"]))
+        subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
+        
+        base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
+        otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
+        
+        for imp in xml_data.findall(".//totalImpuesto"):
+            cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
+            cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
+            base = float(imp.find("baseImponible").text or 0)
+            valor = float(imp.find("valor").text or 0)
+            if cod == "2":
+                if cod_por == "0": base_0 += base
+                elif cod_por in ["2", "3", "4", "10"]: base_12_15 += base; iva_12_15 += valor
+                else: otra_base += base; otro_monto_iva += valor
+            elif cod == "3": ice_val += valor
+            
+        no_iva = round(total - (subtotal + iva_12_15 + otro_monto_iva + ice_val), 2)
+        if no_iva < 0.01: no_iva = 0.0
+        
         m = -1 if tipo_doc == "NC" else 1
-
-        # 6. Mes y Categoría
+        fecha = buscar(["fechaEmision"])
         mes_nombre = "DESCONOCIDO"
-        if fecha and "/" in fecha:
-            meses_dict = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO",
-                         "07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
-            mes_num = fecha.split('/')[1]
-            mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
-
-        info_memoria = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
-
+        if "/" in fecha:
+            try:
+                meses_dict = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO",
+                             "07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
+                mes_num = fecha.split('/')[1]
+                mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
+            except: pass
+            
+        nombre_emisor = buscar(["razonSocial"]).upper().strip()
+        info = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
+        
+        items_raw = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
+        subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
+        
         return {
-            "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": n_factura,
-            "TIPO DE DOCUMENTO": tipo_doc, "RUC": ruc_emisor, "NOMBRE": nombre_emisor,
-            "DETALLE": info_memoria["DETALLE"], "MEMO": info_memoria["MEMO"],
-            "NO IVA": no_iva * m, "MONTO ICE": ice * m, "BASE. 0": base_0 * m, 
-            "BASE. GRAVADA": base_iva * m, "IVA.": valor_iva * m, "TOTAL": importe_total * m
+            "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
+            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": nombre_emisor,
+            "DETALLE": info["DETALLE"], "MEMO": info["MEMO"],
+            "NO IVA": no_iva * m, "MONTO ICE": ice_val * m, "OTRA BASE IVA": otra_base * m,
+            "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, "BASE. 12 / 15": base_12_15 * m,
+            "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": subdetalle
         }
-    except Exception as e:
+    except Exception:
         return None
 
 # --- 5. INTERFAZ ---
 st.title(f"🚀 RAPIDITO - Bienvenido, {st.session_state.usuario_actual}")
 
 with st.sidebar:
-    if st.button("Cerrar Sesión"):
-        st.session_state.autenticado = False
-        st.rerun()
-    st.divider()
     st.header("1. Aprendizaje")
-    uploaded_excel = st.file_uploader("Actualizar Categorías (Excel)", type=["xlsx"])
+    uploaded_excel = st.file_uploader("Cargar Excel Maestro", type=["xlsx"])
     if uploaded_excel:
         df_entrena = pd.read_excel(uploaded_excel)
         df_entrena.columns = [c.upper().strip() for c in df_entrena.columns]
@@ -168,35 +152,53 @@ with st.sidebar:
                     "MEMO": str(fila.get("MEMO", "PROFESIONAL")).upper() 
                 }
         guardar_memoria()
-        st.success("¡Aprendizaje completado!")
+        st.success("¡Memoria actualizada!")
 
-st.header("2. Cargar XMLs")
-uploaded_xmls = st.file_uploader("Sube tus archivos del SRI", type=["xml"], accept_multiple_files=True)
+st.header("2. Procesar Comprobantes")
+uploaded_xmls = st.file_uploader("Arrastra tus archivos XML aquí", type=["xml"], accept_multiple_files=True)
 
-if uploaded_xmls and st.button("GENERAR REPORTE"):
-    data_final = []
+if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
+    lista_data = []
     for xml in uploaded_xmls:
-        resultado = extraer_datos_robusto(xml)
-        if resultado: data_final.append(resultado)
+        res = extraer_datos_robusto(xml)
+        if res: lista_data.append(res)
     
-    if data_final:
-        df = pd.DataFrame(data_final)
-        
-        # Exportación a Excel con tu formato original
+    if lista_data:
+        df = pd.DataFrame(lista_data)
+        orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
+                 "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
+        df = df[orden]
+
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name='COMPRAS', index=False)
-            # (Aquí se aplican los formatos xlsxwriter que ya conoces...)
             workbook = writer.book
-            worksheet = writer.sheets['COMPRAS']
-            header_format = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
-            for col_num, value in enumerate(df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
+            fmt_contabilidad = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
+            f_header_top = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': 'white', 'text_wrap': True})
+            f_data_blanco = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': 'white'})
+            f_data_gris = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#FAFAFA'})
+
+            # HOJA COMPRAS
+            df.to_excel(writer, sheet_name='COMPRAS', index=False)
             
-            # Hoja de Resumen (Mantiene tus fórmulas de Vivienda, Salud, etc.)
-            ws_resumen = workbook.add_worksheet('REPORTE ANUAL')
-            # ... (Lógica de fórmulas SUMIFS igual a la anterior)
+            # HOJA REPORTE ANUAL
+            ws_reporte = workbook.add_worksheet('REPORTE ANUAL')
+            ws_reporte.set_column('A:K', 14)
+            ws_reporte.merge_range('B1:B2', "Negocios y\nServicios", f_header_top)
+            
+            cats = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
+            iconos = ["🏠", "❤️", "🎓", "🛒", "🧢", "✈️", "🚫", "💡"]
+            for i, (cat, ico) in enumerate(zip(cats, iconos)):
+                ws_reporte.write(0, i+2, ico, f_header_top)
+                ws_reporte.write(1, i+2, cat.title(), f_header_top)
+            
+            meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+            for r, mes in enumerate(meses):
+                f_row = f_data_gris if r % 2 != 0 else f_data_blanco
+                ws_reporte.write(r+3, 0, mes.title(), f_row)
+                ws_reporte.write_formula(r+3, 1, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")", f_row)
+                for c in range(len(cats)):
+                    ws_reporte.write_formula(r+3, c+2, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cats[c]}\")", f_row)
+                ws_reporte.write_formula(r+3, 10, f"=SUM(B{r+4}:J{r+4})", f_row)
 
-        st.success(f"¡Listo! Se procesaron {len(data_final)} documentos.")
-        st.download_button("📥 DESCARGAR REPORTE RAPIDITO", output.getvalue(), f"Reporte_{datetime.now().strftime('%Y%m%d')}.xlsx")
-
+        st.success("¡Reporte generado!")
+        st.download_button("📥 DESCARGAR EXCEL RAPIDITO", output.getvalue(), f"RAPIDITO_{datetime.now().strftime('%H%M%S')}.xlsx")
