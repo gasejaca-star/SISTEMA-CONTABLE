@@ -11,8 +11,17 @@ import xlsxwriter
 # --- 1. CONFIGURACIÓN Y SEGURIDAD ---
 st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", page_icon="📊")
 
-# URL de tu Google Sheets (Publicado como CSV)
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
+
+# --- FUNCIÓN DE AUDITORÍA (EL REGISTRO "POR DETRÁS") ---
+def registrar_actividad(usuario, accion):
+    log_file = "registro_secreto_acceso.csv"
+    ahora = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    data = pd.DataFrame([[ahora, usuario, accion]], columns=['FECHA_HORA', 'USUARIO', 'ACCION'])
+    if not os.path.exists(log_file):
+        data.to_csv(log_file, index=False)
+    else:
+        data.to_csv(log_file, mode='a', header=False, index=False)
 
 def cargar_usuarios():
     try:
@@ -41,11 +50,10 @@ if not st.session_state.autenticado:
         if user in db and db[user] == password:
             st.session_state.autenticado = True
             st.session_state.usuario_actual = user
+            registrar_actividad(user, "ENTRÓ AL PORTAL")
             st.rerun()
         else:
             st.sidebar.error("Acceso denegado.")
-    
-    st.info("### Bienvenido a RAPIDITO\nIngresa tus credenciales para continuar.")
     st.stop()
 
 # --- 3. MEMORIA DE APRENDIZAJE ---
@@ -68,7 +76,6 @@ def extraer_datos_robusto(xml_file):
         root = tree.getroot()
         xml_data = None
         tipo_doc = "FC"
-        
         for elem in root.iter():
             tag_lower = elem.tag.lower()
             if 'notacredito' in tag_lower: tipo_doc = "NC"
@@ -79,7 +86,6 @@ def extraer_datos_robusto(xml_file):
                     xml_data = ET.fromstring(clean_text)
                     break
                 except: continue
-        
         if xml_data is None: xml_data = root
 
         def buscar(tags):
@@ -90,10 +96,8 @@ def extraer_datos_robusto(xml_file):
 
         total = float(buscar(["importeTotal", "valorModificado", "total"]))
         subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
-        
         base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
         otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
-        
         for imp in xml_data.findall(".//totalImpuesto"):
             cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
             cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
@@ -104,10 +108,8 @@ def extraer_datos_robusto(xml_file):
                 elif cod_por in ["2", "3", "4", "10"]: base_12_15 += base; iva_12_15 += valor
                 else: otra_base += base; otro_monto_iva += valor
             elif cod == "3": ice_val += valor
-            
         no_iva = round(total - (subtotal + iva_12_15 + otro_monto_iva + ice_val), 2)
         if no_iva < 0.01: no_iva = 0.0
-        
         m = -1 if tipo_doc == "NC" else 1
         fecha = buscar(["fechaEmision"])
         mes_nombre = "DESCONOCIDO"
@@ -118,13 +120,10 @@ def extraer_datos_robusto(xml_file):
                 mes_num = fecha.split('/')[1]
                 mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
             except: pass
-            
         nombre_emisor = buscar(["razonSocial"]).upper().strip()
         info = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
-        
         items_raw = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
         subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
-        
         return {
             "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
             "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": nombre_emisor,
@@ -133,10 +132,9 @@ def extraer_datos_robusto(xml_file):
             "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, "BASE. 12 / 15": base_12_15 * m,
             "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": subdetalle
         }
-    except Exception:
-        return None
+    except Exception: return None
 
-# --- 5. INTERFAZ Y REPORTE ---
+# --- 5. INTERFAZ ---
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
 with st.sidebar:
@@ -154,8 +152,20 @@ with st.sidebar:
                 }
         guardar_memoria()
         st.success("Memoria actualizada.")
-    
+
+    # --- PANEL SECRETO PARA TI ---
+    # Cambia "GABRIEL" por tu nombre de usuario exacto en el Sheets
+    if st.session_state.usuario_actual == "GABRIEL":
+        st.divider()
+        st.header("🕵️ Auditoría Interna")
+        if st.checkbox("Ver log de actividad"):
+            if os.path.exists("registro_secreto_acceso.csv"):
+                df_log = pd.read_csv("registro_secreto_acceso.csv")
+                st.dataframe(df_log.sort_values(by='FECHA_HORA', ascending=False), use_container_width=True)
+            else: st.info("Sin registros.")
+
     if st.button("Cerrar Sesión"):
+        registrar_actividad(st.session_state.usuario_actual, "SALIÓ DEL SISTEMA")
         st.session_state.autenticado = False
         st.rerun()
 
@@ -169,6 +179,7 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
         if res: lista_data.append(res)
     
     if lista_data:
+        registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL ({len(uploaded_xmls)} XMLs)")
         df = pd.DataFrame(lista_data)
         orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
                  "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
@@ -184,15 +195,9 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
             f_data_g = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#FAFAFA'})
             f_total = workbook.add_format({'bold': True, 'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#EFEFEF'})
 
-            # HOJA COMPRAS
             df.to_excel(writer, sheet_name='COMPRAS', index=False)
-            ws_compras = writer.sheets['COMPRAS']
-            ws_compras.set_column('A:Q', 15)
-
-            # HOJA REPORTE ANUAL
             ws_reporte = workbook.add_worksheet('REPORTE ANUAL')
             ws_reporte.set_column('A:K', 14)
-            ws_reporte.write('A1', datetime.now().year, workbook.add_format({'bold': True}))
             ws_reporte.merge_range('B1:B2', "Negocios y\nServicios", f_header)
             
             cats = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
@@ -207,11 +212,10 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
             meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
             for r, mes in enumerate(meses):
-                fila_ex = r + 5 # Ajuste para que coincida con la fila del Excel
+                fila_ex = r + 5
                 fmt = f_data_g if r % 2 != 0 else f_data_b
                 ws_reporte.write(r+3, 0, mes.title(), fmt)
                 
-                # FÓRMULAS CORREGIDAS (SOLO BASES, SIN COLUMNA O de IVA)
                 f_prof = (f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
                           f"SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
                           f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
@@ -227,11 +231,10 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
                 
                 ws_reporte.write_formula(r+3, 10, f"=SUM(B{r+4}:J{r+4})", fmt)
 
-            # TOTAL FINAL
             for col in range(1, 11):
                 letra = xlsxwriter.utility.xl_col_to_name(col)
                 ws_reporte.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
             ws_reporte.write(15, 0, "TOTAL", f_total)
 
-        st.success("¡Excel RAPIDITO listo!")
+        st.success("¡Reporte generado!")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
