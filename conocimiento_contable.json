@@ -1,0 +1,204 @@
+{
+    "empresas": {
+        "ADMINISTRACION ESTRATEGICA DE GASOLINERAS DEL ECUADOR ADESGAE CIA. LTDA.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "ALIANZA FRANCESA": {
+            "DETALLE": "EDUCACION",
+            "MEMO": "PERSONAL"
+        },
+        "AMAGUAYA MOREIRA CRISTIAN ANDRES": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "ARIAS HERNANDEZ RUBI MARIA PATRICIA": {
+            "DETALLE": "GESTION",
+            "MEMO": "PROFESIONAL"
+        },
+        "ATIMASA S.A.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "AUTEC S A": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "CAMPOS LEON RONNAL FERNANDO": {
+            "DETALLE": "NO DEDUCIBLE",
+            "MEMO": "PERSONAL"
+        },
+        "CAÑAS SALAZAR SARA MARIA": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "CARINTERNATIONAL S.A.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "COMBUSTIBLES DEL ECUADOR S A COMDECSA": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "COMERCIAL EL ARBOLITO CIA. LTDA.": {
+            "DETALLE": "GESTIÓN",
+            "MEMO": "PROFESIONAL"
+        },
+        "COMPAÑIA DE TRANSPORTE PESADO CIUDAD DE LOJA COPELOJA CIA. LTDA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COMPAÑIA DE TRANSPORTES ECUATORIANA TRANSHEROICA S.A.": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "CONTIFICO": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COOP. TRANSPORTE EXPRESO TULCAN": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COOPERATIVA DE TRANSPORTE DE PASAJEROS PINAS INTERPROVINCIAL": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COOPERATIVA DE TRANSPORTE FLOR DEL VALLE CAYAMBE": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COOPERATIVA DE TRANSPORTES AMAZONAS": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "COOPERATIVA DE TRANSPORTES LOJA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "DELIVERY HERO DH E-COMMERCE ECUADOR S.A.S.": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "DISTRIBUIDORA DE LIBROS Y PAPELERIA,DILIPA C.LTDA.": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "DISTRIBUIDORA DEL ARTESANO DISARTISAN S.A.": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "DISTRIBUIDORA M&AMP;M": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "EL PINAR SC": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "EMPRESA NACIONAL ECUATORIANA DE TRANSPORTE S. A.": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "FARMAENLACE CIA. LTDA": {
+            "DETALLE": "SALUD",
+            "MEMO": "PERSONAL"
+        },
+        "FUNDACION GODOFREDO ESPINOSA DE LOS MONTEROS": {
+            "DETALLE": "SALUD",
+            "MEMO": "PERSONAL"
+        },
+        "GESURYMACA S.A.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "IGLESIAS TAPIA CIA. LTDA.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "JAIMES RODRIGUEZ BRANNELY ARIADNA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "MASPORMENOS CIA.LTDA.": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "MEDICINA PARA EL ECUADOR MEDIECUADOR HUMANA S.A.": {
+            "DETALLE": "SALUD",
+            "MEMO": "PERSONAL"
+        },
+        "MEGA SANTAMARIA S.A.": {
+            "DETALLE": "ALIMENTACION",
+            "MEMO": "PERSONAL"
+        },
+        "MEIWEI S.A.S.": {
+            "DETALLE": "GESTIÓN",
+            "MEMO": "PROFESIONAL"
+        },
+        "MOSCOSO URIARTE CIA.LTDA.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "NOVISOLUTIONS CIA. LTDA.": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "NUEVAS OPERACIONES COMERCIALES NUCOPSA S.A.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "PEREZ CAMPAÑA WILSON HOMERO": {
+            "DETALLE": "SALUD",
+            "MEMO": "PROFESIONAL"
+        },
+        "PETROGOLDEN COMBUSTIBLES CIA. LTDA.": {
+            "DETALLE": "COMBUSTIBLE",
+            "MEMO": "PROFESIONAL"
+        },
+        "PRONAVALLE SCCI": {
+            "DETALLE": "ALIMENTACION",
+            "MEMO": "PERSONAL"
+        },
+        "ROMACC COMERCIALIZADORA SOCIEDAD CIVIL Y COMERCIAL": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        },
+        "RUANO ANDRADE JOSE FERNANDO": {
+            "DETALLE": "GESTIÓN",
+            "MEMO": "PROFESIONAL"
+        },
+        "SANTAMARIA PEDRO VLADIMIR": {
+            "DETALLE": "GESTIÓN",
+            "MEMO": "PROFESIONAL"
+        },
+        "SERVICIO DE TRANSPORTE EL ESMERALDEÑO": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "TM - DIRULO CIA. LTDA": {
+            "DETALLE": "GESTIÓN",
+            "MEMO": "PROFESIONAL"
+        },
+        "TRANS REINA DEL PARAMO S.A. TRANSREPARSA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "TRANSCARGO EXPRESS LOGISTIC ENCOTRANSCARGO S.A.": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "TRANSPORTE ESCOLAR INSTITUCIONAL COMVOLAN SA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "TRANSPORTES CARCELEN TARQUI CA": {
+            "DETALLE": "SERVICIOS PRESTADOS",
+            "MEMO": "PROFESIONAL"
+        },
+        "TRECX S.A.": {
+            "DETALLE": "SUMINISTROS Y MATERIALES",
+            "MEMO": "PROFESIONAL"
+        }
+    }
+}
