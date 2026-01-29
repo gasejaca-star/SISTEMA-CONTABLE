@@ -12,7 +12,7 @@ import xlsxwriter
 st.set_page_config(page_title="QUSKY AI - Portal Contable", layout="wide", page_icon="📊")
 
 # Reemplaza con tu link de "Publicar en la web" como CSV
-URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSlyfS84_Y9oY68z8W9O_O_xAnXpXpXpXpXpXpXpXpXpXpXpXpXpXp/pub?output=csv"
+URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
 def cargar_usuarios():
     try:
@@ -217,4 +217,5 @@ if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
                 ws_reporte.write_formula(r+3, 10, f"=SUM(B{r+4}:J{r+4})", f_row)
 
         st.success("¡Reporte generado!")
+
         st.download_button("📥 DESCARGAR EXCEL", output.getvalue(), f"Qusky_{datetime.now().strftime('%H%M%S')}.xlsx")
