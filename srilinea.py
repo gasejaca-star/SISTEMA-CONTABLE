@@ -9,7 +9,7 @@ from datetime import datetime
 import xlsxwriter
 
 # --- 1. CONFIGURACIÓN Y SEGURIDAD ---
-st.set_page_config(page_title="RAPIDITO - Portal Contable", layout="wide", page_icon="📊")
+st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", page_icon="📊")
 
 # Reemplaza con tu link de "Publicar en la web" como CSV
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
@@ -43,15 +43,16 @@ if not st.session_state.autenticado:
             st.session_state.usuario_actual = user
             st.rerun()
         else:
-            st.sidebar.error("Acceso denegado.")
+            st.sidebar.error("Usuario o contraseña incorrectos.")
     
-    st.info("### Bienvenido a RAPIDITO\nIngresa tus credenciales para continuar.")
+    st.info("### Bienvenido a RAPIDITO\nPor favor, ingresa tus credenciales en el panel izquierdo.")
     st.stop()
 
 # --- 3. MEMORIA DE APRENDIZAJE ---
 if 'memoria' not in st.session_state:
-    if os.path.exists("conocimiento_contable.json"):
-        with open("conocimiento_contable.json", "r", encoding="utf-8") as f:
+    archivo_memoria = "conocimiento_contable.json"
+    if os.path.exists(archivo_memoria):
+        with open(archivo_memoria, "r", encoding="utf-8") as f:
             st.session_state.memoria = json.load(f)
     else:
         st.session_state.memoria = {"empresas": {}}
@@ -60,7 +61,7 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN XML (TU LÓGICA EXACTA) ---
+# --- 4. MOTOR DE EXTRACCIÓN (TU LÓGICA DE CÁLCULO) ---
 def extraer_datos_robusto(xml_file):
     try:
         tree = ET.parse(xml_file)
@@ -136,7 +137,7 @@ def extraer_datos_robusto(xml_file):
         return None
 
 # --- 5. INTERFAZ ---
-st.title(f"🚀 RAPIDITO - Bienvenido, {st.session_state.usuario_actual}")
+st.title(f"🚀 RAPIDITO AI - Bienvenido, {st.session_state.usuario_actual}")
 
 with st.sidebar:
     st.header("1. Aprendizaje")
@@ -152,16 +153,23 @@ with st.sidebar:
                     "MEMO": str(fila.get("MEMO", "PROFESIONAL")).upper() 
                 }
         guardar_memoria()
-        st.success("¡Memoria actualizada!")
+        st.success("Aprendizaje actualizado.")
+    
+    if st.button("Cerrar Sesión"):
+        st.session_state.autenticado = False
+        st.rerun()
 
 st.header("2. Procesar Comprobantes")
-uploaded_xmls = st.file_uploader("Arrastra tus archivos XML aquí", type=["xml"], accept_multiple_files=True)
+uploaded_xmls = st.file_uploader("Sube tus archivos XML aquí", type=["xml"], accept_multiple_files=True)
 
-if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
+if uploaded_xmls and st.button("GENERAR REPORTE"):
     lista_data = []
-    for xml in uploaded_xmls:
+    progress_bar = st.progress(0)
+    
+    for idx, xml in enumerate(uploaded_xmls):
         res = extraer_datos_robusto(xml)
         if res: lista_data.append(res)
+        progress_bar.progress((idx + 1) / len(uploaded_xmls))
     
     if lista_data:
         df = pd.DataFrame(lista_data)
@@ -172,33 +180,77 @@ if uploaded_xmls and st.button("GENERAR REPORTE VISUAL"):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             workbook = writer.book
+            
+            # FORMATOS
             fmt_contabilidad = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
+            f_titulo_anio = workbook.add_format({'bold': True, 'font_size': 12})
             f_header_top = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': 'white', 'text_wrap': True})
+            f_subheader_gris = workbook.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#F2F2F2'})
             f_data_blanco = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': 'white'})
             f_data_gris = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#FAFAFA'})
+            f_total_row = workbook.add_format({'bold': True, 'num_format': fmt_contabilidad, 'top': 2, 'border': 1, 'bg_color': '#EFEFEF'})
+            f_meses_col = workbook.add_format({'bold': False, 'border': 1, 'bg_color': '#F2F2F2'})
 
             # HOJA COMPRAS
             df.to_excel(writer, sheet_name='COMPRAS', index=False)
-            
+            ws_compras = writer.sheets['COMPRAS']
+            ws_compras.set_column('A:Q', 15)
+
             # HOJA REPORTE ANUAL
             ws_reporte = workbook.add_worksheet('REPORTE ANUAL')
-            ws_reporte.set_column('A:K', 14)
+            ws_reporte.set_column('A:A', 12)
+            ws_reporte.set_column('B:K', 14)
+
+            ws_reporte.write('A1', datetime.now().year, f_titulo_anio)
             ws_reporte.merge_range('B1:B2', "Negocios y\nServicios", f_header_top)
             
-            cats = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
+            cats_personales = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
             iconos = ["🏠", "❤️", "🎓", "🛒", "🧢", "✈️", "🚫", "💡"]
-            for i, (cat, ico) in enumerate(zip(cats, iconos)):
-                ws_reporte.write(0, i+2, ico, f_header_top)
-                ws_reporte.write(1, i+2, cat.title(), f_header_top)
+            
+            for i, (cat, icono) in enumerate(zip(cats_personales, iconos)):
+                col_idx = i + 2
+                ws_reporte.write(0, col_idx, icono, f_header_top)
+                ws_reporte.write(1, col_idx, cat.title(), f_header_top)
+            
+            ws_reporte.merge_range('K1:K2', "Total Mes", f_header_top)
+            ws_reporte.write('B3', "PROFESIONALES", f_subheader_gris)
+            ws_reporte.merge_range('C3:J3', "GASTOS PERSONALES", f_subheader_gris)
             
             meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+            start_row = 3
             for r, mes in enumerate(meses):
-                f_row = f_data_gris if r % 2 != 0 else f_data_blanco
-                ws_reporte.write(r+3, 0, mes.title(), f_row)
-                ws_reporte.write_formula(r+3, 1, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")", f_row)
-                for c in range(len(cats)):
-                    ws_reporte.write_formula(r+3, c+2, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cats[c]}\")", f_row)
-                ws_reporte.write_formula(r+3, 10, f"=SUM(B{r+4}:J{r+4})", f_row)
+                fila_excel = start_row + r + 1
+                current_row_idx = start_row + r
+                formato_fila = f_data_gris if r % 2 != 0 else f_data_blanco
+                ws_reporte.write(current_row_idx, 0, mes.title(), f_meses_col)
+                
+                # Fórmulas SUMIFS EXACTAS (sumando las 6 columnas de bases/iva de COMPRAS)
+                f_prof = (f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
+                          f"SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
+                          f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
+                          f"SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
+                          f"SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
+                          f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")")
+                ws_reporte.write_formula(current_row_idx, 1, f_prof, formato_fila)
 
-        st.success("¡Reporte generado!")
-        st.download_button("📥 DESCARGAR EXCEL RAPIDITO", output.getvalue(), f"RAPIDITO_{datetime.now().strftime('%H%M%S')}.xlsx")
+                for c, cat in enumerate(cats_personales):
+                    # Suma Base 12 y Base 0 para Gastos Personales
+                    f_pers = (f"=SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")+"
+                              f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")")
+                    ws_reporte.write_formula(current_row_idx, c + 2, f_pers, formato_fila)
+                
+                ws_reporte.write_formula(current_row_idx, 10, f"=SUM(B{fila_excel}:J{fila_excel})", formato_fila)
+
+            # Totales finales
+            for col_idx in range(1, 11):
+                letra = xlsxwriter.utility.xl_col_to_name(col_idx)
+                ws_reporte.write_formula(16, col_idx, f"=SUM({letra}4:{letra}16)", f_total_row)
+            ws_reporte.write(16, 0, "Total General", f_total_row)
+
+        st.success("¡Reporte RAPIDITO generado con éxito!")
+        st.download_button(
+            label="📥 DESCARGAR EXCEL",
+            data=output.getvalue(),
+            file_name=f"Reporte_Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
