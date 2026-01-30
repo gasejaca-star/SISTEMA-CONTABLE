@@ -16,7 +16,7 @@ URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlN
 
 # --- FUNCIÓN DE AUDITORÍA CENTRALIZADA (GOOGLE FORMS) ---
 def registrar_actividad(usuario, accion, cantidad=None):
-    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/formResponse"
+    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/viewform"
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
     payload = {
@@ -237,4 +237,5 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
         st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
+
 
