@@ -14,34 +14,27 @@ st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", pa
 
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
-# --- FUNCIÓN DE AUDITORÍA CENTRALIZADA (GOOGLE FORMS) ---
+# --- FUNCIÓN DE AUDITORÍA CENTRALIZADA ---
 def registrar_actividad(usuario, accion, cantidad=None):
-    # URL de respuesta (formResponse)
-    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/formResponse"
+    # URL de tu Google Apps Script (Puente directo al Sheets)
+    URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
     
-    # Preparamos el mensaje
+    # Preparamos el mensaje de la acción
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
-    # --- ESTOS SON LOS IDS REALES DE TU FORMULARIO ---
+    # Paquete de datos en formato JSON
     payload = {
-        "entry.2120862021": str(usuario),   # ID para la pregunta de Usuario
-        "entry.174112117": str(detalle_accion) # ID para la pregunta de Acción
+        "usuario": str(usuario),
+        "accion": str(detalle_accion)
     }
     
-    # Encabezado para que Google no lo bloquee como "bot"
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    
     try:
-        # Enviamos los datos
-        response = requests.post(url_form, data=payload, headers=headers, timeout=5)
-        
-        # Esto te servirá para ver en tu consola si funcionó
-        if response.status_code == 200:
-            print(f"✅ Log enviado: {usuario} | {detalle_accion}")
-        else:
-            print(f"❌ Error de Google: {response.status_code}")
+        # Enviamos los datos al script de Google
+        # Usamos json=payload para que el Apps Script lo reciba correctamente
+        requests.post(URL_PUENTE, json=payload, timeout=10)
     except Exception as e:
-        print(f"⚠️ Error de red: {e}")
+        # Si hay un error de red, el programa sigue funcionando
+        print(f"Error de conexión con el log: {e}")
 # --- 2. SISTEMA DE LOGIN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -237,6 +230,7 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
         st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
+
 
 
 
