@@ -5,6 +5,7 @@ import re
 import json
 import io
 import os
+import requests
 from datetime import datetime
 import xlsxwriter
 
@@ -13,15 +14,20 @@ st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", pa
 
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
-# --- FUNCIÓN DE AUDITORÍA (EL REGISTRO "POR DETRÁS") ---
-def registrar_actividad(usuario, accion):
-    log_file = "registro_secreto_acceso.csv"
-    ahora = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    data = pd.DataFrame([[ahora, usuario, accion]], columns=['FECHA_HORA', 'USUARIO', 'ACCION'])
-    if not os.path.exists(log_file):
-        data.to_csv(log_file, index=False)
-    else:
-        data.to_csv(log_file, mode='a', header=False, index=False)
+# --- FUNCIÓN DE AUDITORÍA CENTRALIZADA (GOOGLE FORMS) ---
+def registrar_actividad(usuario, accion, cantidad=None):
+    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/formResponse"
+    detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
+    
+    payload = {
+        "entry.124675402": usuario, 
+        "entry.2004581223": detalle_accion
+    }
+    
+    try:
+        requests.post(url_form, data=payload, timeout=3)
+    except:
+        pass
 
 def cargar_usuarios():
     try:
@@ -33,7 +39,7 @@ def cargar_usuarios():
             if str(row['estado']).lower().strip() == 'activo'
         }
         return usuarios
-    except Exception:
+    except:
         return {}
 
 # --- 2. SISTEMA DE LOGIN ---
@@ -53,7 +59,7 @@ if not st.session_state.autenticado:
             registrar_actividad(user, "ENTRÓ AL PORTAL")
             st.rerun()
         else:
-            st.sidebar.error("Acceso denegado.")
+            st.sidebar.error("Usuario o contraseña incorrectos.")
     st.stop()
 
 # --- 3. MEMORIA DE APRENDIZAJE ---
@@ -138,38 +144,30 @@ def extraer_datos_robusto(xml_file):
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
 with st.sidebar:
-    st.header("1. Entrenamiento")
-    uploaded_excel = st.file_uploader("Subir Excel Maestro", type=["xlsx"])
-    if uploaded_excel:
-        df_entrena = pd.read_excel(uploaded_excel)
-        df_entrena.columns = [c.upper().strip() for c in df_entrena.columns]
-        for _, fila in df_entrena.iterrows():
-            nombre = str(fila.get("NOMBRE", "")).upper().strip()
-            if nombre and nombre != "NAN":
-                st.session_state.memoria["empresas"][nombre] = {
-                    "DETALLE": str(fila.get("DETALLE", "OTROS")).upper(),
-                    "MEMO": str(fila.get("MEMO", "PROFESIONAL")).upper() 
-                }
-        guardar_memoria()
-        st.success("Memoria actualizada.")
-
-    # --- PANEL SECRETO PARA TI ---
-    # Cambia "GABRIEL" por tu nombre de usuario exacto en el Sheets
+    # --- FILTRO DE ADMINISTRADOR PARA ENTRENAMIENTO ---
     if st.session_state.usuario_actual == "GABRIEL":
+        st.header("1. Herramientas Master")
+        uploaded_excel = st.file_uploader("Entrenar con Excel Maestro", type=["xlsx"])
+        if uploaded_excel:
+            df_entrena = pd.read_excel(uploaded_excel)
+            df_entrena.columns = [c.upper().strip() for c in df_entrena.columns]
+            for _, fila in df_entrena.iterrows():
+                nombre = str(fila.get("NOMBRE", "")).upper().strip()
+                if nombre and nombre != "NAN":
+                    st.session_state.memoria["empresas"][nombre] = {
+                        "DETALLE": str(fila.get("DETALLE", "OTROS")).upper(),
+                        "MEMO": str(fila.get("MEMO", "PROFESIONAL")).upper() 
+                    }
+            guardar_memoria()
+            st.success("Cerebro actualizado, Gabriel.")
         st.divider()
-        st.header("🕵️ Auditoría Interna")
-        if st.checkbox("Ver log de actividad"):
-            if os.path.exists("registro_secreto_acceso.csv"):
-                df_log = pd.read_csv("registro_secreto_acceso.csv")
-                st.dataframe(df_log.sort_values(by='FECHA_HORA', ascending=False), use_container_width=True)
-            else: st.info("Sin registros.")
-
+    
     if st.button("Cerrar Sesión"):
         registrar_actividad(st.session_state.usuario_actual, "SALIÓ DEL SISTEMA")
         st.session_state.autenticado = False
         st.rerun()
 
-st.header("2. Procesamiento")
+st.header("🛒 Procesar Comprobantes")
 uploaded_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
 
 if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
@@ -179,7 +177,8 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
         if res: lista_data.append(res)
     
     if lista_data:
-        registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL ({len(uploaded_xmls)} XMLs)")
+        registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL", len(uploaded_xmls))
+        
         df = pd.DataFrame(lista_data)
         orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
                  "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
@@ -212,7 +211,7 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
             meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
             for r, mes in enumerate(meses):
-                fila_ex = r + 5
+                fila_ex = r + 4
                 fmt = f_data_g if r % 2 != 0 else f_data_b
                 ws_reporte.write(r+3, 0, mes.title(), fmt)
                 
@@ -229,12 +228,12 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
                               f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")")
                     ws_reporte.write_formula(r+3, c+2, f_pers, fmt)
                 
-                ws_reporte.write_formula(r+3, 10, f"=SUM(B{r+4}:J{r+4})", fmt)
+                ws_reporte.write_formula(r+3, 10, f"=SUM(B{fila_ex}:J{fila_ex})", fmt)
 
             for col in range(1, 11):
                 letra = xlsxwriter.utility.xl_col_to_name(col)
                 ws_reporte.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
             ws_reporte.write(15, 0, "TOTAL", f_total)
 
-        st.success("¡Reporte generado!")
+        st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
