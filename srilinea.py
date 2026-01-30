@@ -20,8 +20,8 @@ def registrar_actividad(usuario, accion, cantidad=None):
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
     payload = {
-        "entry.124675402": usuario, 
-        "entry.2004581223": detalle_accion
+        "entry.2120862021": str(usuario),   
+        "entry.174112117": str(detalle_accion)
     }
     
     try:
@@ -237,3 +237,4 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
         st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
+
