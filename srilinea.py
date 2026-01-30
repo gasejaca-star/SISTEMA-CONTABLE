@@ -16,32 +16,32 @@ URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlN
 
 # --- FUNCIÓN DE AUDITORÍA CENTRALIZADA (GOOGLE FORMS) ---
 def registrar_actividad(usuario, accion, cantidad=None):
-    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/viewform"
+    # URL de respuesta (formResponse)
+    url_form = "https://docs.google.com/forms/d/e/1FAIpQLSf23lDSCCJwv48pa9Fn_4NeCv_1OHB9tlW9v5bKFY64q6mfLg/formResponse"
+    
+    # Preparamos el mensaje
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
+    # --- ESTOS SON LOS IDS REALES DE TU FORMULARIO ---
     payload = {
-        "entry.2120862021": str(usuario),   
-        "entry.174112117": str(detalle_accion)
+        "entry.2120862021": str(usuario),   # ID para la pregunta de Usuario
+        "entry.174112117": str(detalle_accion) # ID para la pregunta de Acción
     }
     
+    # Encabezado para que Google no lo bloquee como "bot"
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    
     try:
-        requests.post(url_form, data=payload, timeout=3)
-    except:
-        pass
-
-def cargar_usuarios():
-    try:
-        df = pd.read_csv(URL_SHEET)
-        df.columns = [c.lower().strip() for c in df.columns]
-        usuarios = {
-            str(row['usuario']).strip(): str(row['clave']).strip() 
-            for _, row in df.iterrows() 
-            if str(row['estado']).lower().strip() == 'activo'
-        }
-        return usuarios
-    except:
-        return {}
-
+        # Enviamos los datos
+        response = requests.post(url_form, data=payload, headers=headers, timeout=5)
+        
+        # Esto te servirá para ver en tu consola si funcionó
+        if response.status_code == 200:
+            print(f"✅ Log enviado: {usuario} | {detalle_accion}")
+        else:
+            print(f"❌ Error de Google: {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Error de red: {e}")
 # --- 2. SISTEMA DE LOGIN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -237,5 +237,6 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
         st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
+
 
 
