@@ -14,27 +14,38 @@ st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", pa
 
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
-# --- FUNCIÓN DE AUDITORÍA CENTRALIZADA ---
+# --- FUNCIÓN DE AUDITORÍA DIRECTA A GOOGLE SHEETS (APPS SCRIPT) ---
 def registrar_actividad(usuario, accion, cantidad=None):
-    # URL de tu Google Apps Script (Puente directo al Sheets)
+    # Esta es la URL de tu implementación de Apps Script
     URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
     
-    # Preparamos el mensaje de la acción
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
-    # Paquete de datos en formato JSON
+    # Paquete de datos en formato JSON para el Script
     payload = {
         "usuario": str(usuario),
         "accion": str(detalle_accion)
     }
     
     try:
-        # Enviamos los datos al script de Google
-        # Usamos json=payload para que el Apps Script lo reciba correctamente
+        # Envío directo al Sheets
         requests.post(URL_PUENTE, json=payload, timeout=10)
-    except Exception as e:
-        # Si hay un error de red, el programa sigue funcionando
-        print(f"Error de conexión con el log: {e}")
+    except:
+        pass
+
+def cargar_usuarios():
+    try:
+        df = pd.read_csv(URL_SHEET)
+        df.columns = [c.lower().strip() for c in df.columns]
+        usuarios = {
+            str(row['usuario']).strip(): str(row['clave']).strip() 
+            for _, row in df.iterrows() 
+            if str(row['estado']).lower().strip() == 'activo'
+        }
+        return usuarios
+    except:
+        return {}
+
 # --- 2. SISTEMA DE LOGIN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -137,7 +148,6 @@ def extraer_datos_robusto(xml_file):
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
 with st.sidebar:
-    # --- FILTRO DE ADMINISTRADOR PARA ENTRENAMIENTO ---
     if st.session_state.usuario_actual == "GABRIEL":
         st.header("1. Herramientas Master")
         uploaded_excel = st.file_uploader("Entrenar con Excel Maestro", type=["xlsx"])
@@ -170,6 +180,7 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
         if res: lista_data.append(res)
     
     if lista_data:
+        # Registro automático en el Sheets con cantidad de archivos
         registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL", len(uploaded_xmls))
         
         df = pd.DataFrame(lista_data)
@@ -230,7 +241,3 @@ if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
 
         st.success(f"Listo Gabriel, reporte procesado.")
         st.download_button("📥 DESCARGAR REPORTE", output.getvalue(), f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
-
-
-
-
