@@ -95,6 +95,10 @@
         "EL PINAR SC": {
             "DETALLE": "COMBUSTIBLE",
             "MEMO": "PROFESIONAL"
+              },
+        "FUNDACION VISTA PARA TODOS": {
+            "DETALLE": "SALUD",
+            "MEMO": "PERSONAL"
         },
         "EMPRESA NACIONAL ECUATORIANA DE TRANSPORTE S. A.": {
             "DETALLE": "SERVICIOS PRESTADOS",
@@ -3722,3 +3726,4 @@
         }
     }
 }
+
