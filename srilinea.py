@@ -30,12 +30,8 @@ def cargar_usuarios():
     try:
         df = pd.read_csv(URL_SHEET)
         df.columns = [c.lower().strip() for c in df.columns]
-        usuarios = {
-            str(row['usuario']).strip(): str(row['clave']).strip() 
-            for _, row in df.iterrows() 
-            if str(row['estado']).lower().strip() == 'activo'
-        }
-        return usuarios
+        return {str(row['usuario']).strip(): str(row['clave']).strip() 
+                for _, row in df.iterrows() if str(row['estado']).lower().strip() == 'activo'}
     except:
         return {}
 
@@ -47,7 +43,6 @@ if not st.session_state.autenticado:
     st.sidebar.title("🔐 Acceso Clientes")
     user = st.sidebar.text_input("Usuario")
     password = st.sidebar.text_input("Contraseña", type="password")
-    
     if st.sidebar.button("Iniciar Sesión"):
         db = cargar_usuarios()
         if user in db and db[user] == password:
@@ -72,16 +67,12 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN XML (TU LÓGICA ORIGINAL) ---
+# --- 4. MOTOR DE EXTRACCIÓN XML (COPIADO EXACTAMENTE DE TU CÓDIGO) ---
 def extraer_datos_robusto(xml_file):
     try:
-        # Adaptación para aceptar tanto archivos de Streamlit como contenido binario del SRI
-        if isinstance(xml_file, bytes):
-            root = ET.fromstring(xml_file)
-        else:
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-
+        # Nota: ET.parse funciona con objetos de archivo (subidos) o BytesIO (SRI)
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
         xml_data = None
         tipo_doc = "FC"
         for elem in root.iter():
@@ -106,7 +97,6 @@ def extraer_datos_robusto(xml_file):
         subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
         base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
         otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
-
         for imp in xml_data.findall(".//totalImpuesto"):
             cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
             cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
@@ -117,7 +107,7 @@ def extraer_datos_robusto(xml_file):
                 elif cod_por in ["2", "3", "4", "10"]: base_12_15 += base; iva_12_15 += valor
                 else: otra_base += base; otro_monto_iva += valor
             elif cod == "3": ice_val += valor
-
+            
         no_iva = round(total - (subtotal + iva_12_15 + otro_monto_iva + ice_val), 2)
         if no_iva < 0.01: no_iva = 0.0
         m = -1 if tipo_doc == "NC" else 1
@@ -147,29 +137,24 @@ def extraer_datos_robusto(xml_file):
         }
     except Exception: return None
 
-# --- 5. GENERADOR EXCEL RAPIDITO (CON TU FORMATO Y FÓRMULAS) ---
-def crear_excel_comprobantes(lista_data):
+# --- 5. INTERFAZ Y GENERACIÓN DE EXCEL ---
+def procesar_a_excel(lista_data):
     df = pd.DataFrame(lista_data)
     orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
              "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
-    
-    # Blindaje contra KeyError: asegura que todas las columnas existan antes de reordenar
-    for col in orden:
-        if col not in df.columns: df[col] = 0.0
     df = df[orden]
-
+    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
-        fmt_cont = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
+        fmt_contabilidad = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
         f_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFFFFF', 'text_wrap': True})
         f_subh = workbook.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#F2F2F2'})
-        f_data_b = workbook.add_format({'num_format': fmt_cont, 'border': 1, 'bg_color': 'white'})
-        f_data_g = workbook.add_format({'num_format': fmt_cont, 'border': 1, 'bg_color': '#FAFAFA'})
-        f_total = workbook.add_format({'bold': True, 'num_format': fmt_cont, 'border': 1, 'bg_color': '#EFEFEF'})
+        f_data_b = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': 'white'})
+        f_data_g = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#FAFAFA'})
+        f_total = workbook.add_format({'bold': True, 'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#EFEFEF'})
 
         df.to_excel(writer, sheet_name='COMPRAS', index=False)
-        
         ws_reporte = workbook.add_worksheet('REPORTE ANUAL')
         ws_reporte.set_column('A:K', 14)
         ws_reporte.merge_range('B1:B2', "Negocios y\nServicios", f_header)
@@ -190,7 +175,6 @@ def crear_excel_comprobantes(lista_data):
             fmt = f_data_g if r % 2 != 0 else f_data_b
             ws_reporte.write(r+3, 0, mes.title(), fmt)
             
-            # FÓRMULAS SUMIFS ORIGINALES
             f_prof = (f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
                       f"SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
                       f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
@@ -210,10 +194,8 @@ def crear_excel_comprobantes(lista_data):
             letra = xlsxwriter.utility.xl_col_to_name(col)
             ws_reporte.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
         ws_reporte.write(15, 0, "TOTAL", f_total)
-        
     return output.getvalue()
 
-# --- 6. INTERFAZ DE USUARIO ---
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
 with st.sidebar:
@@ -231,68 +213,61 @@ with st.sidebar:
                         "MEMO": str(fila.get("MEMO", "PROFESIONAL")).upper() 
                     }
             guardar_memoria()
-            st.success("Cerebro actualizado, Gabriel.")
-        st.divider()
+            st.success("Cerebro actualizado.")
     
     if st.button("Cerrar Sesión"):
-        registrar_actividad(st.session_state.usuario_actual, "SALIÓ DEL SISTEMA")
+        registrar_actividad(st.session_state.usuario_actual, "SALIÓ")
         st.session_state.autenticado = False
         st.rerun()
 
-# Pestañas para organizar las herramientas
-t1, t2 = st.tabs(["📂 Subida Manual", "📡 Descarga Masiva SRI"])
+# --- FLUJO DE TRABAJO ---
+tab_manual, tab_sri = st.tabs(["📂 Subir XMLs", "📡 Descarga SRI (TXT)"])
 
-with t1:
-    st.header("🛒 Procesar XMLs Manuales")
+with tab_manual:
+    st.header("Subida de Comprobantes")
     uploaded_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
     if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
-        lista_data = [extraer_datos_robusto(x) for x in uploaded_xmls if extraer_datos_robusto(x)]
+        lista_data = []
+        for xml in uploaded_xmls:
+            res = extraer_datos_robusto(xml)
+            if res: lista_data.append(res)
+        
         if lista_data:
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL MANUAL", len(uploaded_xmls))
-            st.success(f"Procesados {len(lista_data)} archivos.")
-            st.download_button("📥 DESCARGAR REPORTE", crear_excel_comprobantes(lista_data), f"Manual_{datetime.now().strftime('%H%M%S')}.xlsx")
+            excel = procesar_a_excel(lista_data)
+            st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
 
-with t2:
-    st.header("⚡ Descarga Automática desde TXT")
-    st.write("Sube el archivo 'Recibidos.txt' descargado del SRI.")
+with tab_sri:
+    st.header("Descarga Masiva SRI")
     uploaded_txt = st.file_uploader("Subir Recibidos.txt", type=["txt"])
-    
-    if uploaded_txt and st.button("🚀 INICIAR DESCARGA Y REPORTE"):
-        # latin-1 para evitar errores de caracteres especiales en el TXT del SRI
+    if uploaded_txt and st.button("🚀 INICIAR DESCARGA"):
         content = uploaded_txt.read().decode("latin-1")
         claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
         
         if claves:
             progreso = st.progress(0)
             status = st.empty()
-            lista_data_sri = []
+            lista_sri = []
             zip_buffer = io.BytesIO()
-            
             with zipfile.ZipFile(zip_buffer, "a") as zf:
                 for i, clave in enumerate(claves):
                     url = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
-                    payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                                   <soapenv:Header/><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{clave}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
-                                </soapenv:Envelope>"""
+                    env = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
+                              <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{clave}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
+                              </soapenv:Envelope>'''
                     try:
-                        r = requests.post(url, data=payload, headers={'Content-Type': 'text/xml'}, verify=False, timeout=10)
+                        r = requests.post(url, data=env, headers={'Content-Type':'text/xml'}, verify=False, timeout=10)
                         if r.status_code == 200 and "<autorizaciones>" in r.text:
-                            # Guardamos en el ZIP para el usuario
                             zf.writestr(f"{clave}.xml", r.text)
-                            # Procesamos con tu motor para el Excel
-                            res = extraer_datos_robusto(r.content)
-                            if res: lista_data_sri.append(res)
-                    except:
-                        pass
-                    
+                            # Convertimos la respuesta a BytesIO para que ET.parse lo lea igual que un archivo
+                            xml_io = io.BytesIO(r.content)
+                            res = extraer_datos_robusto(xml_io)
+                            if res: lista_sri.append(res)
+                    except: pass
                     progreso.progress((i + 1) / len(claves))
-                    status.text(f"Descargando {i+1} de {len(claves)} comprobantes...")
+                    status.text(f"Procesando {i+1} de {len(claves)}")
             
-            if lista_data_sri:
-                registrar_actividad(st.session_state.usuario_actual, "DESCARGA MASIVA SRI", len(claves))
-                st.success("¡Descarga y procesamiento completado!")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.download_button("📦 DESCARGAR ZIP (XMLs)", zip_buffer.getvalue(), "comprobantes_sri.zip")
-                with col2:
-                    st.download_button("📊 DESCARGAR EXCEL", crear_excel_comprobantes(lista_data_sri), f"Reporte_SRI_{datetime.now().strftime('%H%M%S')}.xlsx")
+            if lista_sri:
+                st.success("¡Proceso completado!")
+                st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
+                st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
