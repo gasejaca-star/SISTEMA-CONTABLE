@@ -238,36 +238,41 @@ with tab_manual:
             st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
 
 with tab_sri:
-    st.header("Descarga Masiva SRI")
-    uploaded_txt = st.file_uploader("Subir Recibidos.txt", type=["txt"])
-    if uploaded_txt and st.button("🚀 INICIAR DESCARGA"):
-        content = uploaded_txt.read().decode("latin-1")
+   up_txt = st.file_uploader("Subir Recibidos.txt del SRI", type=["txt"])
+    if up_txt and st.button("📥 INICIAR DESCARGA Y EXCEL"):
+        content = up_txt.read().decode("latin-1")
         claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
         
         if claves:
-            progreso = st.progress(0)
+            barra = st.progress(0)
             status = st.empty()
             lista_sri = []
             zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a") as zf:
-                for i, clave in enumerate(claves):
-                    url = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
-                    env = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                              <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{clave}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
-                              </soapenv:Envelope>'''
-                    try:
-                        r = requests.post(url, data=env, headers={'Content-Type':'text/xml'}, verify=False, timeout=10)
-                        if r.status_code == 200 and "<autorizaciones>" in r.text:
-                            zf.writestr(f"{clave}.xml", r.text)
-                            # Convertimos la respuesta a BytesIO para que ET.parse lo lea igual que un archivo
-                            xml_io = io.BytesIO(r.content)
-                            res = extraer_datos_robusto(xml_io)
-                            if res: lista_sri.append(res)
-                    except: pass
-                    progreso.progress((i + 1) / len(claves))
-                    status.text(f"Procesando {i+1} de {len(claves)}")
             
+            with zipfile.ZipFile(zip_buffer, "a") as zf:
+                for i, cl in enumerate(claves):
+                    payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
+                                  <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
+                                  </soapenv:Envelope>'''
+                    try:
+                        r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
+                        if r.status_code == 200 and "<autorizaciones>" in r.text:
+                            # 1. Guardar en el ZIP
+                            zf.writestr(f"{cl}.xml", r.text)
+                            # 2. Pasar al motor de extracción (usando BytesIO para que sea como un archivo)
+                            xml_io = io.BytesIO(r.content)
+                            datos = extraer_datos_robusto(xml_io)
+                            if datos: lista_sri.append(datos)
+                    except: pass
+                    
+                    avance = (i + 1) / len(claves)
+                    barra.progress(avance)
+                    status.text(f"Procesando {i+1} de {len(claves)}...")
+
             if lista_sri:
-                st.success("¡Proceso completado!")
-                st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
-                st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
+                st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
+                with col_b:
+                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
