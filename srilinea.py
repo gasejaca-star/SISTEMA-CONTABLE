@@ -15,6 +15,12 @@ import xlsxwriter
 st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", page_icon="📊")
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Configuración del Web Service SRI
+URL_WS = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
+HEADERS_WS = {
+    "Content-Type": "text/xml;charset=UTF-8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+}
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
 def registrar_actividad(usuario, accion, cantidad=None):
@@ -67,10 +73,9 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN XML (COPIADO EXACTAMENTE DE TU CÓDIGO) ---
+# --- 4. MOTOR DE EXTRACCIÓN XML ---
 def extraer_datos_robusto(xml_file):
     try:
-        # Nota: ET.parse funciona con objetos de archivo (subidos) o BytesIO (SRI)
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
@@ -137,13 +142,16 @@ def extraer_datos_robusto(xml_file):
         }
     except Exception: return None
 
-# --- 5. INTERFAZ Y GENERACIÓN DE EXCEL ---
+# --- 5. GENERACIÓN DE EXCEL ---
 def procesar_a_excel(lista_data):
     df = pd.DataFrame(lista_data)
     orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
              "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
-    df = df[orden]
     
+    for col in orden:
+        if col not in df.columns: df[col] = 0.0
+
+    df = df[orden]
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
@@ -196,6 +204,7 @@ def procesar_a_excel(lista_data):
         ws_reporte.write(15, 0, "TOTAL", f_total)
     return output.getvalue()
 
+# --- 6. INTERFAZ PRINCIPAL ---
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
 with st.sidebar:
@@ -220,25 +229,21 @@ with st.sidebar:
         st.session_state.autenticado = False
         st.rerun()
 
-# --- FLUJO DE TRABAJO ---
 tab_manual, tab_sri = st.tabs(["📂 Subir XMLs", "📡 Descarga SRI (TXT)"])
 
 with tab_manual:
     st.header("Subida de Comprobantes")
     uploaded_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
     if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
-        lista_data = []
-        for xml in uploaded_xmls:
-            res = extraer_datos_robusto(xml)
-            if res: lista_data.append(res)
-        
+        lista_data = [extraer_datos_robusto(xml) for xml in uploaded_xmls if extraer_datos_robusto(xml)]
         if lista_data:
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL MANUAL", len(uploaded_xmls))
             excel = procesar_a_excel(lista_data)
             st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
 
 with tab_sri:
-   up_txt = st.file_uploader("Subir Recibidos.txt del SRI", type=["txt"])
+    st.header("Descarga Masiva SRI")
+    up_txt = st.file_uploader("Subir Recibidos.txt del SRI", type=["txt"])
     if up_txt and st.button("📥 INICIAR DESCARGA Y EXCEL"):
         content = up_txt.read().decode("latin-1")
         claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
@@ -257,16 +262,13 @@ with tab_sri:
                     try:
                         r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
                         if r.status_code == 200 and "<autorizaciones>" in r.text:
-                            # 1. Guardar en el ZIP
                             zf.writestr(f"{cl}.xml", r.text)
-                            # 2. Pasar al motor de extracción (usando BytesIO para que sea como un archivo)
                             xml_io = io.BytesIO(r.content)
                             datos = extraer_datos_robusto(xml_io)
                             if datos: lista_sri.append(datos)
                     except: pass
                     
-                    avance = (i + 1) / len(claves)
-                    barra.progress(avance)
+                    barra.progress((i + 1) / len(claves))
                     status.text(f"Procesando {i+1} de {len(claves)}...")
 
             if lista_sri:
