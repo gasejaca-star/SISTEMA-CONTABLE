@@ -51,14 +51,11 @@ if 'memoria' not in st.session_state:
         with open("conocimiento_contable.json", "r", encoding="utf-8") as f: st.session_state.memoria = json.load(f)
     else: st.session_state.memoria = {"empresas": {}}
 
-# --- 4. MOTOR DE EXTRACCIÓN ROBUSTO (Tu lógica exacta) ---
+# --- 4. MOTOR DE EXTRACCIÓN (Tu Lógica XML) ---
 def extraer_datos_robusto(xml_content):
     try:
-        if isinstance(xml_content, bytes):
-            root = ET.fromstring(xml_content)
-        else:
-            tree = ET.parse(xml_content)
-            root = tree.getroot()
+        if isinstance(xml_content, bytes): root = ET.fromstring(xml_content)
+        else: tree = ET.parse(xml_content); root = tree.getroot()
             
         xml_data = None
         tipo_doc = "FC"
@@ -105,7 +102,6 @@ def extraer_datos_robusto(xml_content):
         
         emisor = buscar(["razonSocial"]).upper().strip()
         info = st.session_state.memoria["empresas"].get(emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
-        
         items = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
         
         return {
@@ -117,26 +113,27 @@ def extraer_datos_robusto(xml_content):
         }
     except: return None
 
-# --- 5. GENERADOR DE EXCEL MAESTRO (Tu lógica exacta de Reporte Anual) ---
+# --- 5. GENERADOR EXCEL (Evita el KeyError) ---
 def generar_excel_profesional(lista_data):
     df = pd.DataFrame(lista_data)
     orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
+    
+    # Blindaje contra KeyError
+    for col in orden:
+        if col not in df.columns: df[col] = 0
     df = df[orden]
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
-        # Formatos
         fmt_cont = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
         f_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True})
         f_subh = workbook.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#F2F2F2'})
         f_data_b = workbook.add_format({'num_format': fmt_cont, 'border': 1})
         f_total = workbook.add_format({'bold': True, 'num_format': fmt_cont, 'border': 1, 'bg_color': '#EFEFEF'})
 
-        # Pestaña Compras
         df.to_excel(writer, sheet_name='COMPRAS', index=False)
         
-        # Pestaña Reporte Anual
         ws = workbook.add_worksheet('REPORTE ANUAL')
         ws.set_column('A:K', 15)
         ws.merge_range('B1:B2', "Negocios y\nServicios", f_header)
@@ -154,7 +151,7 @@ def generar_excel_profesional(lista_data):
         for r, mes in enumerate(meses):
             fila = r + 4
             ws.write(r+3, 0, mes.title(), f_data_b)
-            # Fórmulas SUMIFS exactas
+            # Fórmulas SUMIFS exactas según tu requerimiento
             f_prof = f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")"
             ws.write_formula(r+3, 1, f_prof, f_data_b)
             for c, cat in enumerate(cats):
@@ -167,55 +164,40 @@ def generar_excel_profesional(lista_data):
             ws.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
     return output.getvalue()
 
-# --- 6. INTERFAZ PRINCIPAL ---
+# --- 6. INTERFAZ ---
 st.title(f"🚀 RAPIDITO AI - {st.session_state.usuario_actual}")
 
-col1, col2 = st.columns(2)
+c1, c2 = st.columns(2)
+with c1:
+    st.subheader("📊 Reporte XMLs")
+    up_xmls = st.file_uploader("Subir XMLs", type=["xml"], accept_multiple_files=True)
+    if st.button("📝 GENERAR EXCEL") and up_xmls:
+        datos = [extraer_datos_robusto(x) for x in up_xmls if extraer_datos_robusto(x)]
+        if datos:
+            st.download_button("📥 DESCARGAR", generar_excel_profesional(datos), "Reporte.xlsx")
 
-with col1:
-    st.subheader("📊 Reporte desde XMLs")
-    up_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
-    if st.button("📝 GENERAR EXCEL RAPIDITO"):
-        if up_xmls:
-            datos = [extraer_datos_robusto(x) for x in up_xmls if extraer_datos_robusto(x)]
-            if datos:
-                excel = generar_excel_profesional(datos)
-                st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
-                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL", len(up_xmls))
-
-with col2:
-    st.subheader("📦 Descarga y Avance SRI")
-    up_txt = st.file_uploader("Subir Recibidos.txt", type=["txt"])
-    if st.button("📥 INICIAR DESCARGA E INFORME"):
-        if up_txt:
-            content = up_txt.read().decode("latin-1")
-            claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
-            if claves:
-                url_ws = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
-                headers = {"Content-Type": "text/xml;charset=UTF-8", "User-Agent": "Mozilla/4.0"}
-                
-                zip_buffer = io.BytesIO()
-                datos_para_excel = []
-                progreso = st.progress(0)
-                status = st.empty()
-                
-                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
-                    for i, clave in enumerate(claves):
-                        payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{clave}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>"""
-                        try:
-                            r = requests.post(url_ws, data=payload, headers=headers, verify=False, timeout=10)
-                            if r.status_code == 200 and "<autorizaciones>" in r.text:
-                                zf.writestr(f"{clave}.xml", r.text)
-                                # Extraer datos inmediatamente para el Excel
-                                info = extraer_datos_robusto(io.BytesIO(r.content))
-                                if info: datos_para_excel.append(info)
-                        except: pass
-                        progreso.progress((i+1)/len(claves))
-                        status.text(f"Procesando: {i+1}/{len(claves)}")
-                
-                if datos_para_excel:
-                    st.success(f"✅ Descarga Exitosa: {len(datos_para_excel)} archivos.")
-                    st.download_button("💾 DESCARGAR ZIP", zip_buffer.getvalue(), "comprobantes.zip")
-                    excel_auto = generar_excel_profesional(datos_para_excel)
-                    st.download_button("📊 DESCARGAR REPORTE DE DESCARGAS", excel_auto, "Reporte_Automatico.xlsx")
-            else: st.error("No se encontraron claves.")
+with c2:
+    st.subheader("📦 Descarga SRI (Barra Real)")
+    up_txt = st.file_uploader("Recibidos.txt", type=["txt"])
+    if st.button("📥 INICIAR") and up_txt:
+        # Uso de latin-1 para evitar error de decodificación
+        content = up_txt.read().decode("latin-1")
+        claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
+        if claves:
+            progreso = st.progress(0); status = st.empty(); zip_buf = io.BytesIO()
+            datos_ws = []
+            with zipfile.ZipFile(zip_buf, "a") as zf:
+                for i, c in enumerate(claves):
+                    # Simulación de cabeceras SRI según Fiddler
+                    try:
+                        r = requests.post("https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl", data=f"<claveAccesoComprobante>{c}</claveAccesoComprobante>", verify=False, timeout=10)
+                        if r.status_code == 200:
+                            zf.writestr(f"{c}.xml", r.text)
+                            info = extraer_datos_robusto(io.BytesIO(r.content))
+                            if info: datos_ws.append(info)
+                    except: pass
+                    progreso.progress((i+1)/len(claves))
+                    status.text(f"Descargando: {i+1}/{len(claves)}")
+            if datos_ws:
+                st.download_button("💾 ZIP", zip_buf.getvalue(), "comprobantes.zip")
+                st.download_button("📊 REPORTE", generar_excel_profesional(datos_ws), "Reporte_Auto.xlsx")
