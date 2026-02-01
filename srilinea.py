@@ -285,8 +285,11 @@ with tab_sri:
 
             if lista_sri:
                 st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
+                # Registro de auditoría para el módulo SRI
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL SRI", len(lista_sri))
                 col_a, col_b = st.columns(2)
                 with col_a:
                     st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
                 with col_b:
                     st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
+
