@@ -13,17 +13,14 @@ import xlsxwriter
 
 # --- 1. CONFIGURACIÓN Y SEGURIDAD ---
 st.set_page_config(page_title="RAPIDITO AI - Master Web", layout="wide", page_icon="📊")
-
-# Desactivar avisos de certificados (Fiddler Mode)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
 def registrar_actividad(usuario, accion, cantidad=None):
     URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
-    detalle_accion = f"{accion} ({cantidad} docs)" if cantidad is not None else accion
-    payload = {"usuario": str(usuario), "accion": str(detalle_accion)}
-    try: requests.post(URL_PUENTE, json=payload, timeout=10)
+    detalle = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
+    try: requests.post(URL_PUENTE, json={"usuario": str(usuario), "accion": str(detalle)}, timeout=10)
     except: pass
 
 def cargar_usuarios():
@@ -34,108 +31,42 @@ def cargar_usuarios():
     except: return {}
 
 # --- 2. LOGIN ---
-if "autenticado" not in st.session_state:
-    st.session_state.autenticado = False
+if "autenticado" not in st.session_state: st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
-    st.sidebar.title("🔐 Acceso Clientes")
-    user = st.sidebar.text_input("Usuario")
-    password = st.sidebar.text_input("Contraseña", type="password")
-    if st.sidebar.button("Iniciar Sesión"):
+    st.sidebar.title("🔐 Acceso")
+    u, p = st.sidebar.text_input("Usuario"), st.sidebar.text_input("Contraseña", type="password")
+    if st.sidebar.button("Entrar"):
         db = cargar_usuarios()
-        if user in db and db[user] == password:
-            st.session_state.autenticado, st.session_state.usuario_actual = True, user
-            registrar_actividad(user, "ENTRÓ AL PORTAL")
+        if u in db and db[u] == p:
+            st.session_state.autenticado, st.session_state.usuario_actual = True, u
+            registrar_actividad(u, "ENTRÓ AL PORTAL")
             st.rerun()
-        else: st.sidebar.error("Error de acceso.")
+        else: st.sidebar.error("Error de credenciales.")
     st.stop()
 
-# --- 3. MEMORIA ---
+# --- 3. MEMORIA (Cerebro Contable) ---
 if 'memoria' not in st.session_state:
     if os.path.exists("conocimiento_contable.json"):
         with open("conocimiento_contable.json", "r", encoding="utf-8") as f: st.session_state.memoria = json.load(f)
     else: st.session_state.memoria = {"empresas": {}}
 
-def guardar_memoria():
-    with open("conocimiento_contable.json", "w", encoding="utf-8") as f: json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
-
-# --- 4. MOTOR DE DESCARGA WEB SERVICE (SRI ENGINE) ---
-
-def descargar_xmls_ws(file_txt):
+# --- 4. MOTOR DE EXTRACCIÓN ROBUSTO (Tu lógica exacta) ---
+def extraer_datos_robusto(xml_content):
     try:
-        # Usamos latin-1 para evitar el error 'utf-8' codec can't decode
-        content = file_txt.read().decode("latin-1")
-        claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
-        
-        if not claves:
-            st.error("❌ No se encontraron claves de acceso en el archivo.")
-            return None
-
-        # URL y Headers capturados de Fiddler
-        url_ws = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
-        headers = {
-            "Content-Type": "text/xml;charset=UTF-8",
-            "User-Agent": "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.2; WOW64; Trident/7.0)",
-            "Cookie": "TS010a7529=0115ac86d2859bb60ce3e314743f6a0cee3bcf365d8cb7ce8e5ef76bbc09c6509733dfb5dcf2a1b1dc29feb273505a1d0838bc427c",
-            "SOAPAction": ""
-        }
-
-        zip_buffer = io.BytesIO()
-        exitos = 0
-        
-        # UI: Barra de progreso y log
-        progreso_barra = st.progress(0)
-        progreso_texto = st.empty()
-        
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zip_file:
-            for i, clave in enumerate(claves):
-                payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                   <soapenv:Body>
-                      <ec:autorizacionComprobante>
-                         <claveAccesoComprobante>{clave}</claveAccesoComprobante>
-                      </ec:autorizacionComprobante>
-                   </soapenv:Body>
-                </soapenv:Envelope>"""
-                
-                try:
-                    # Intento de descarga (timeout de 15s como en tu código original)
-                    r = requests.post(url_ws, data=payload, headers=headers, verify=False, timeout=15)
-                    
-                    if r.status_code == 200 and "<autorizaciones>" in r.text:
-                        zip_file.writestr(f"{clave}.xml", r.text)
-                        exitos += 1
-                except Exception:
-                    pass
-                
-                # Actualizar progreso en la interfaz
-                avance = (i + 1) / len(claves)
-                progreso_barra.progress(avance)
-                progreso_texto.text(f"🚀 Procesando: {int(avance*100)}% ({i+1}/{len(claves)})")
-
-        if exitos > 0:
-            st.success(f"🏁 ¡Proceso finalizado! Se descargaron {exitos} comprobantes con éxito.")
-            return zip_buffer.getvalue()
+        if isinstance(xml_content, bytes):
+            root = ET.fromstring(xml_content)
         else:
-            st.error("🚨 Error de conexión: El servidor del SRI no respondió o las claves no están autorizadas.")
-            return None
+            tree = ET.parse(xml_content)
+            root = tree.getroot()
             
-    except Exception as e:
-        st.error(f"⚠️ Error al leer el archivo: {str(e)}")
-        return None
-
-# --- 5. MOTOR DE EXTRACCIÓN XML (PARA EL EXCEL) ---
-
-def extraer_datos_xml(xml_file):
-    try:
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
         xml_data = None
         tipo_doc = "FC"
         for elem in root.iter():
-            tag_lower = elem.tag.lower()
-            if 'notacredito' in tag_lower: tipo_doc = "NC"
-            elif 'liquidacioncompra' in tag_lower: tipo_doc = "LC"
-            if 'comprobante' in tag_lower and elem.text:
+            tag_l = elem.tag.lower()
+            if 'notacredito' in tag_l: tipo_doc = "NC"
+            elif 'liquidacioncompra' in tag_l: tipo_doc = "LC"
+            if 'comprobante' in tag_l and elem.text:
                 try:
                     clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
                     xml_data = ET.fromstring(clean_text)
@@ -151,84 +82,140 @@ def extraer_datos_xml(xml_file):
 
         total = float(buscar(["importeTotal", "valorModificado", "total"]))
         subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
-        base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
-        otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
-        for imp in xml_data.findall(".//totalImpuesto"):
-            cod = imp.find("codigo").text or ""
-            cod_por = imp.find("codigoPorcentaje").text or ""
-            base = float(imp.find("baseImponible").text or 0)
-            valor = float(imp.find("valor").text or 0)
-            if cod == "2":
-                if cod_por == "0": base_0 += base
-                elif cod_por in ["2", "3", "4", "10"]: base_12_15 += base; iva_12_15 += valor
-                else: otra_base += base; otro_monto_iva += valor
-            elif cod == "3": ice_val += valor
+        base_0, base_12_15, iva_12_15, otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         
+        for imp in xml_data.findall(".//totalImpuesto"):
+            cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
+            cod_p = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
+            b = float(imp.find("baseImponible").text or 0)
+            v = float(imp.find("valor").text or 0)
+            if cod == "2":
+                if cod_p == "0": base_0 += b
+                elif cod_p in ["2", "3", "4", "10"]: base_12_15 += b; iva_12_15 += v
+                else: otra_base += b; otro_monto_iva += v
+            elif cod == "3": ice_val += v
+            
         no_iva = round(total - (subtotal + iva_12_15 + otro_monto_iva + ice_val), 2)
         if no_iva < 0.01: no_iva = 0.0
         m = -1 if tipo_doc == "NC" else 1
         
         fecha = buscar(["fechaEmision"])
-        mes_nombre = "DESCONOCIDO"
-        if "/" in fecha:
-            meses_dict = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO","07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
-            mes_num = fecha.split('/')[1]
-            mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
-
-        nombre_emisor = buscar(["razonSocial"]).upper().strip()
-        info = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
+        meses_dict = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO","07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
+        mes_nombre = meses_dict.get(fecha.split('/')[1], "DESCONOCIDO") if "/" in fecha else "DESCONOCIDO"
+        
+        emisor = buscar(["razonSocial"]).upper().strip()
+        info = st.session_state.memoria["empresas"].get(emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
+        
+        items = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
         
         return {
             "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
-            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": nombre_emisor,
+            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": emisor,
             "DETALLE": info["DETALLE"], "MEMO": info["MEMO"], "NO IVA": no_iva * m, "MONTO ICE": ice_val * m, 
             "OTRA BASE IVA": otra_base * m, "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, 
-            "BASE. 12 / 15": base_12_15 * m, "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": "XML"
+            "BASE. 12 / 15": base_12_15 * m, "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": " | ".join(items[:5])
         }
     except: return None
 
-# --- 6. INTERFAZ ---
-st.title(f"🚀 RAPIDITO AI - {st.session_state.usuario_actual}")
+# --- 5. GENERADOR DE EXCEL MAESTRO (Tu lógica exacta de Reporte Anual) ---
+def generar_excel_profesional(lista_data):
+    df = pd.DataFrame(lista_data)
+    orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
+    df = df[orden]
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        # Formatos
+        fmt_cont = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
+        f_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True})
+        f_subh = workbook.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#F2F2F2'})
+        f_data_b = workbook.add_format({'num_format': fmt_cont, 'border': 1})
+        f_total = workbook.add_format({'bold': True, 'num_format': fmt_cont, 'border': 1, 'bg_color': '#EFEFEF'})
 
-with st.sidebar:
-    if st.session_state.usuario_actual == "GABRIEL":
-        st.header("⚙️ Entrenamiento")
-        uploaded_excel = st.file_uploader("Subir Excel Maestro", type=["xlsx"])
-        if uploaded_excel:
-            df_e = pd.read_excel(uploaded_excel)
-            df_e.columns = [c.upper().strip() for c in df_e.columns]
-            for _, f in df_e.iterrows():
-                n = str(f.get("NOMBRE", "")).upper().strip()
-                if n and n != "NAN":
-                    st.session_state.memoria["empresas"][n] = {"DETALLE": str(f.get("DETALLE", "OTROS")).upper(), "MEMO": str(f.get("MEMO", "PROFESIONAL")).upper()}
-            guardar_memoria(); st.success("Cerebro actualizado.")
-    if st.button("Cerrar Sesión"): st.session_state.autenticado = False; st.rerun()
+        # Pestaña Compras
+        df.to_excel(writer, sheet_name='COMPRAS', index=False)
+        
+        # Pestaña Reporte Anual
+        ws = workbook.add_worksheet('REPORTE ANUAL')
+        ws.set_column('A:K', 15)
+        ws.merge_range('B1:B2', "Negocios y\nServicios", f_header)
+        cats = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
+        iconos = ["🏠", "❤️", "🎓", "🛒", "🧢", "✈️", "🚫", "💡"]
+        for i, (cat, ico) in enumerate(zip(cats, iconos)):
+            ws.write(0, i+2, ico, f_header)
+            ws.write(1, i+2, cat.title(), f_header)
+        
+        ws.merge_range('K1:K2', "Total Mes", f_header)
+        ws.write('B3', "PROFESIONALES", f_subh)
+        ws.merge_range('C3:J3', "GASTOS PERSONALES", f_subh)
+
+        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+        for r, mes in enumerate(meses):
+            fila = r + 4
+            ws.write(r+3, 0, mes.title(), f_data_b)
+            # Fórmulas SUMIFS exactas
+            f_prof = f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")"
+            ws.write_formula(r+3, 1, f_prof, f_data_b)
+            for c, cat in enumerate(cats):
+                f_pers = f"=SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")+SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")"
+                ws.write_formula(r+3, c+2, f_pers, f_data_b)
+            ws.write_formula(r+3, 10, f"=SUM(B{fila}:J{fila})", f_data_b)
+        
+        for col in range(1, 11):
+            letra = xlsxwriter.utility.xl_col_to_name(col)
+            ws.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
+    return output.getvalue()
+
+# --- 6. INTERFAZ PRINCIPAL ---
+st.title(f"🚀 RAPIDITO AI - {st.session_state.usuario_actual}")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📊 Generar Reporte Excel")
-    up_xmls = st.file_uploader("Subir XMLs Manuales", type=["xml"], accept_multiple_files=True)
-    if st.button("📝 PROCESAR Y GENERAR EXCEL"):
+    st.subheader("📊 Reporte desde XMLs")
+    up_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
+    if st.button("📝 GENERAR EXCEL RAPIDITO"):
         if up_xmls:
-            datos_finales = [extraer_datos_xml(x) for x in up_xmls if extraer_datos_xml(x) is not None]
-            if datos_finales:
-                df = pd.DataFrame(datos_finales)
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='COMPRAS', index=False)
-                st.success(f"Reporte listo con {len(datos_finales)} documentos.")
-                st.download_button("📥 DESCARGAR EXCEL", output.getvalue(), f"Reporte_{st.session_state.usuario_actual}.xlsx")
-        else: st.warning("Sube primero los archivos XML.")
+            datos = [extraer_datos_robusto(x) for x in up_xmls if extraer_datos_robusto(x)]
+            if datos:
+                excel = generar_excel_profesional(datos)
+                st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL", len(up_xmls))
 
 with col2:
-    st.subheader("📦 Descargar Comprobantes (SRI)")
+    st.subheader("📦 Descarga y Avance SRI")
     up_txt = st.file_uploader("Subir Recibidos.txt", type=["txt"])
-    if st.button("📥 INICIAR DESCARGA XMLs"):
+    if st.button("📥 INICIAR DESCARGA E INFORME"):
         if up_txt:
-            zip_final = descargar_xmls_ws(up_txt)
-            if zip_final:
-                st.download_button("💾 GUARDAR ARCHIVO ZIP", zip_final, "comprobantes_sri.zip", "application/zip")
-                registrar_actividad(st.session_state.usuario_actual, "DESCARGÓ XMLs WS")
-        else: st.warning("Sube primero el archivo .txt del SRI.")
-
+            content = up_txt.read().decode("latin-1")
+            claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
+            if claves:
+                url_ws = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
+                headers = {"Content-Type": "text/xml;charset=UTF-8", "User-Agent": "Mozilla/4.0"}
+                
+                zip_buffer = io.BytesIO()
+                datos_para_excel = []
+                progreso = st.progress(0)
+                status = st.empty()
+                
+                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
+                    for i, clave in enumerate(claves):
+                        payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{clave}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>"""
+                        try:
+                            r = requests.post(url_ws, data=payload, headers=headers, verify=False, timeout=10)
+                            if r.status_code == 200 and "<autorizaciones>" in r.text:
+                                zf.writestr(f"{clave}.xml", r.text)
+                                # Extraer datos inmediatamente para el Excel
+                                info = extraer_datos_robusto(io.BytesIO(r.content))
+                                if info: datos_para_excel.append(info)
+                        except: pass
+                        progreso.progress((i+1)/len(claves))
+                        status.text(f"Procesando: {i+1}/{len(claves)}")
+                
+                if datos_para_excel:
+                    st.success(f"✅ Descarga Exitosa: {len(datos_para_excel)} archivos.")
+                    st.download_button("💾 DESCARGAR ZIP", zip_buffer.getvalue(), "comprobantes.zip")
+                    excel_auto = generar_excel_profesional(datos_para_excel)
+                    st.download_button("📊 DESCARGAR REPORTE DE DESCARGAS", excel_auto, "Reporte_Automatico.xlsx")
+            else: st.error("No se encontraron claves.")
