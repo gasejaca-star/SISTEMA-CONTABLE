@@ -73,23 +73,28 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN XML ---
+# --- 5. MOTOR DE EXTRACCIÓN ROBUSTO (EL QUE LIMPIA EL XML) ---
 def extraer_datos_robusto(xml_file):
     try:
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
         tipo_doc = "FC"
+        
+        # Bucle para encontrar el nodo comprobante y limpiar el CDATA/XML anidado
         for elem in root.iter():
             tag_lower = elem.tag.lower()
             if 'notacredito' in tag_lower: tipo_doc = "NC"
             elif 'liquidacioncompra' in tag_lower: tipo_doc = "LC"
+            
             if 'comprobante' in tag_lower and elem.text:
                 try:
+                    # Limpiamos posibles declaraciones XML internas que dañan el parser
                     clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
                     xml_data = ET.fromstring(clean_text)
                     break
                 except: continue
+        
         if xml_data is None: xml_data = root
 
         def buscar(tags):
@@ -98,10 +103,12 @@ def extraer_datos_robusto(xml_file):
                 if f is not None and f.text: return f.text
             return "0"
 
+        # Cálculos de Impuestos
         total = float(buscar(["importeTotal", "valorModificado", "total"]))
         subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
         base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
         otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
+        
         for imp in xml_data.findall(".//totalImpuesto"):
             cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
             cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
@@ -117,6 +124,7 @@ def extraer_datos_robusto(xml_file):
         if no_iva < 0.01: no_iva = 0.0
         m = -1 if tipo_doc == "NC" else 1
         
+        # Fecha y Mes
         fecha = buscar(["fechaEmision"])
         mes_nombre = "DESCONOCIDO"
         if "/" in fecha:
@@ -126,22 +134,6 @@ def extraer_datos_robusto(xml_file):
                 mes_num = fecha.split('/')[1]
                 mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
             except: pass
-            
-        nombre_emisor = buscar(["razonSocial"]).upper().strip()
-        info = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
-        items_raw = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
-        subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
-        
-        return {
-            "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
-            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": nombre_emisor,
-            "DETALLE": info["DETALLE"], "MEMO": info["MEMO"],
-            "NO IVA": no_iva * m, "MONTO ICE": ice_val * m, "OTRA BASE IVA": otra_base * m,
-            "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, "BASE. 12 / 15": base_12_15 * m,
-            "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": subdetalle
-        }
-    except Exception: return None
-
 # --- 5. GENERACIÓN DE EXCEL ---
 def procesar_a_excel(lista_data):
     df = pd.DataFrame(lista_data)
@@ -278,3 +270,4 @@ with tab_sri:
                     st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
                 with col_b:
                     st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
+
