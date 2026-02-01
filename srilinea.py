@@ -61,18 +61,130 @@ if not st.session_state.autenticado:
             st.sidebar.error("Usuario o contraseña incorrectos.")
     st.stop()
 
-# --- 4. MEMORIA DE APRENDIZAJE ---
-if 'memoria' not in st.session_state:
-    archivo_memoria = "conocimiento_contable.json"
-    if os.path.exists(archivo_memoria):
-        with open(archivo_memoria, "r", encoding="utf-8") as f:
-            st.session_state.memoria = json.load(f)
-    else:
-        st.session_state.memoria = {"empresas": {}}
+# --- 4. MOTOR DE EXTRACCIÓN XML ---
+def extraer_datos_robusto(xml_file):
+    try:
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        xml_data = None
+        tipo_doc = "FC"
 
-def guardar_memoria():
-    with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
-        json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
+        # Detectar tipo de documento y XML embebido
+        for elem in root.iter():
+            tag_lower = elem.tag.lower()
+            if 'notacredito' in tag_lower:
+                tipo_doc = "NC"
+            elif 'liquidacioncompra' in tag_lower:
+                tipo_doc = "LC"
+
+            if 'comprobante' in tag_lower and elem.text:
+                try:
+                    clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
+                    xml_data = ET.fromstring(clean_text)
+                    break
+                except:
+                    continue
+
+        if xml_data is None:
+            xml_data = root
+
+        # Buscador genérico
+        def buscar(tags):
+            for t in tags:
+                f = xml_data.find(f".//{t}")
+                if f is not None and f.text:
+                    return f.text
+            return "0"
+
+        total = float(buscar(["importeTotal", "valorModificado", "total"]))
+        subtotal = float(buscar(["totalSinImpuestos", "subtotal"]))
+
+        base_0 = 0.0
+        base_12_15 = 0.0
+        iva_12_15 = 0.0
+        otra_base = 0.0
+        otro_monto_iva = 0.0
+        ice_val = 0.0
+
+        # Impuestos
+        for imp in xml_data.findall(".//totalImpuesto"):
+            cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
+            cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
+            base = float(imp.find("baseImponible").text or 0)
+            valor = float(imp.find("valor").text or 0)
+
+            if cod == "2":  # IVA
+                if cod_por == "0":
+                    base_0 += base
+                elif cod_por in ["2", "3", "4", "10"]:
+                    base_12_15 += base
+                    iva_12_15 += valor
+                else:
+                    otra_base += base
+                    otro_monto_iva += valor
+
+            elif cod == "3":  # ICE
+                ice_val += valor
+
+        no_iva = round(total - (subtotal + iva_12_15 + otro_monto_iva + ice_val), 2)
+        if no_iva < 0.01:
+            no_iva = 0.0
+
+        m = -1 if tipo_doc == "NC" else 1
+
+        # Fecha y mes
+        fecha = buscar(["fechaEmision"])
+        mes_nombre = "DESCONOCIDO"
+
+        if "/" in fecha:
+            try:
+                meses_dict = {
+                    "01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL",
+                    "05":"MAYO","06":"JUNIO","07":"JULIO","08":"AGOSTO",
+                    "09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"
+                }
+                mes_num = fecha.split('/')[1]
+                mes_nombre = meses_dict.get(mes_num, "DESCONOCIDO")
+            except:
+                pass
+
+        nombre_emisor = buscar(["razonSocial"]).upper().strip()
+
+        info = st.session_state.memoria["empresas"].get(
+            nombre_emisor,
+            {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"}
+        )
+
+        items_raw = [
+            d.find("descripcion").text
+            for d in xml_data.findall(".//detalle")
+            if d.find("descripcion") is not None
+        ]
+
+        subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
+
+        return {
+            "MES": mes_nombre,
+            "FECHA": fecha,
+            "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
+            "TIPO DE DOCUMENTO": tipo_doc,
+            "RUC": buscar(["ruc"]),
+            "NOMBRE": nombre_emisor,
+            "DETALLE": info["DETALLE"],
+            "MEMO": info["MEMO"],
+            "NO IVA": no_iva * m,
+            "MONTO ICE": ice_val * m,
+            "OTRA BASE IVA": otra_base * m,
+            "OTRO MONTO IVA": otro_monto_iva * m,
+            "BASE. 0": base_0 * m,
+            "BASE. 12 / 15": base_12_15 * m,
+            "IVA.": iva_12_15 * m,
+            "TOTAL": total * m,
+            "SUBDETALLE": subdetalle
+        }
+
+    except Exception:
+        return None
 
 # --- 5. MOTOR DE EXTRACCIÓN ROBUSTO (EL QUE LIMPIA EL XML) ---
 def extraer_datos_robusto(xml_file):
@@ -248,3 +360,4 @@ with tab_sri:
                 st.success(f"Procesados {len(lista_sri)} documentos.")
                 st.download_button("📦 DESCARGAR ZIP", zip_buffer.getvalue(), "facturas.zip")
                 st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
+
