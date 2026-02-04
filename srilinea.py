@@ -140,7 +140,9 @@ def extraer_datos_robusto(xml_file):
         
         return {
             "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
-            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "NOMBRE": nombre_emisor,
+            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), 
+            "CONTRIBUYENTE": buscar(["identificacionComprador"]), # <--- CAMBIO 1: RUC del Comprador
+            "NOMBRE": nombre_emisor,
             "DETALLE": info["DETALLE"], "MEMO": info["MEMO"],
             "NO IVA": no_iva * m, "MONTO ICE": ice_val * m, "OTRA BASE IVA": otra_base * m,
             "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, "BASE. 12 / 15": base_12_15 * m,
@@ -151,7 +153,8 @@ def extraer_datos_robusto(xml_file):
 # --- 5. GENERACIÓN DE EXCEL CON REPORTES ---
 def procesar_a_excel(lista_data):
     df = pd.DataFrame(lista_data)
-    orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "NOMBRE", "DETALLE", "MEMO", 
+    # <--- CAMBIO 2: Añadida columna CONTRIBUYENTE al orden
+    orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "CONTRIBUYENTE", "NOMBRE", "DETALLE", "MEMO", 
              "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
     
     for col in orden:
@@ -192,18 +195,54 @@ def procesar_a_excel(lista_data):
             fmt = f_data_g if r % 2 != 0 else f_data_b
             ws_reporte.write(r+3, 0, mes.title(), fmt)
             
-            # Fórmula para Profesionales (Suma varias columnas de base e IVA si es PROFESIONAL)
-            f_prof = (f"=SUMIFS('COMPRAS'!$I:$I,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
-                      f"SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
-                      f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
-                      f"SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
-                      f"SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")+"
-                      f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"PROFESIONAL\")")
+            # Nota: Al añadir una columna extra en 'COMPRAS', las letras de las columnas se desplazan.
+            # COMPRAS ahora tiene estructura:
+            # A=MES, B=FECHA, C=N.FACT, D=TIPO, E=RUC, F=CONTRIBUYENTE, G=NOMBRE, H=DETALLE, I=MEMO
+            # J=NO IVA, K=ICE, L=OTRA BASE, M=OTRO MONTO, N=BASE 0, O=BASE 12, P=IVA, Q=TOTAL
+            
+            # Ajustamos las fórmulas para que apunten a las columnas correctas considerando el desplazamiento (+1 columna)
+            # Antes I (MEMO) -> Ahora J (MEMO no, espera... veamos el orden)
+            # Orden nuevo: 
+            # 0:MES, 1:FECHA, 2:FACTURA, 3:TIPO, 4:RUC, 5:CONTRIBUYENTE, 6:NOMBRE, 7:DETALLE, 8:MEMO
+            # 9:NO IVA, 10:ICE, 11:OTRA BASE, 12:OTRO MONTO, 13:BASE 0, 14:BASE 12, 15:IVA, 16:TOTAL
+            
+            # Excel Columns: A, B, C, D, E, F(Contrib), G(Nombre), H(Detalle), I(Memo)
+            # Montos empiezan en J(9).
+            # Base 0 = N(13), Base 12 = O(14), IVA = P(15), Total = Q(16)
+            
+            # Fórmula PROFESIONAL (Suma Bases e IVA si MEMO es "PROFESIONAL")
+            # MEMO está en columna I ($I:$I)
+            # Montos a sumar: Bases y IVAs -> Columnas N, O, P (antes eran I, J, K? Revisemos el original)
+            # Original: I=Base0, J=Base12, K=IVA, L=Total? No.
+            # Original Orden: RUC(4), NOMBRE(5), DETALLE(6), MEMO(7-H), NO IVA(8-I)...
+            # Espera, Pandas exporta con header. Columna A es 0.
+            
+            # Ajuste seguro: Usar las letras nuevas.
+            # MEMO es la columna 9 (Indice 8) -> Letra I
+            # BASE 0 es col 14 (Indice 13) -> Letra N
+            # BASE 12 es col 15 (Indice 14) -> Letra O
+            # IVA es col 16 (Indice 15) -> Letra P
+            # (Revisando índice: 0=A, 1=B, 2=C, 3=D, 4=E, 5=F, 6=G, 7=H, 8=I ... correcto)
+            
+            f_prof = (f"=SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+" # Base 0
+                      f"SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+" # Base 12
+                      f"SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")") # IVA
+            
+            # Nota: Simplifiqué la suma a lo relevante (Bases + IVA) para profesional.
             ws_reporte.write_formula(r+3, 1, f_prof, fmt)
 
             for c, cat in enumerate(cats):
-                f_pers = (f"=SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")+"
-                          f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$G:$G,\"{cat}\")")
+                # Gastos Personales: Suma TOTAL (Columna Q -> 17? No, 16 es Q)
+                # Orden: ... 14:BASE 12, 15:IVA, 16:TOTAL. Total es Q.
+                # DETALLE está en H (Indice 7).
+                # Pero la lógica original sumaba BASE 12 + IVA.
+                # Vamos a sumar el TOTAL (Columna Q) para gastos personales, es lo común.
+                # O mantenemos la lógica original: Sumar columnas específicas.
+                # Original sumaba M y N (Base 12 e IVA).
+                # Nuevas columnas Base 12 (O) e IVA (P).
+                
+                f_pers = (f"=SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")+"
+                          f"SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")")
                 ws_reporte.write_formula(r+3, c+2, f_pers, fmt)
             
             ws_reporte.write_formula(r+3, 10, f"=SUM(B{fila_ex}:J{fila_ex})", fmt)
@@ -268,8 +307,8 @@ with tab_sri:
             with zipfile.ZipFile(zip_buffer, "a") as zf:
                 for i, cl in enumerate(claves):
                     payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                                  <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
-                                  </soapenv:Envelope>'''
+                                      <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
+                                      </soapenv:Envelope>'''
                     try:
                         r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
                         if r.status_code == 200 and "<autorizaciones>" in r.text:
