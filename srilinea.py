@@ -319,6 +319,7 @@ with tab_sri:
                 with col_a:
                     st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
                 with col_b:
-                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")"Reporte_SRI.xlsx")
+                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")"Reporte_SRI.xlsx")"Reporte_SRI.xlsx")
+
 
 
