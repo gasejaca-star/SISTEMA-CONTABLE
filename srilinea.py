@@ -271,5 +271,50 @@ with tab_manual:
         lista_data = [extraer_datos_robusto(xml) for xml in uploaded_xmls if extraer_datos_robusto(xml)]
         if lista_data:
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL MANUAL", len(uploaded_xmls))
+            excel = procesar_a_excel(lista_data)
+            st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
 
+with tab_sri:
+    st.header("Descarga Masiva SRI")
+    # Agregamos la KEY dinámica
+    up_txt = st.file_uploader(
+        "Subir Recibidos.txt del SRI", 
+        type=["txt"],
+        key=f"txt_uploader_{st.session_state.id_proceso}"
+    )
+    if up_txt and st.button("📥 INICIAR DESCARGA Y EXCEL"):
+        content = up_txt.read().decode("latin-1")
+        claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
+        
+        if claves:
+            barra = st.progress(0)
+            status = st.empty()
+            lista_sri = []
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, "a") as zf:
+                for i, cl in enumerate(claves):
+                    payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
+                                      <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
+                                      </soapenv:Envelope>'''
+                    try:
+                        r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
+                        if r.status_code == 200 and "<autorizaciones>" in r.text:
+                            zf.writestr(f"{cl}.xml", r.text)
+                            xml_io = io.BytesIO(r.content)
+                            datos = extraer_datos_robusto(xml_io)
+                            if datos: lista_sri.append(datos)
+                    except: pass
+                    
+                    barra.progress((i + 1) / len(claves))
+                    status.text(f"Procesando {i+1} de {len(claves)}...")
+
+            if lista_sri:
+                st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL SRI", len(lista_sri))
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
+                with col_b:
+                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
 
