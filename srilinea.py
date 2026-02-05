@@ -10,6 +10,7 @@ import zipfile
 import urllib3
 from datetime import datetime
 import xlsxwriter
+import time
 
 # --- 1. CONFIGURACIÓN Y SEGURIDAD ---
 st.set_page_config(page_title="RAPIDITO AI - Portal Contable", layout="wide", page_icon="📊")
@@ -19,26 +20,25 @@ URL_WS = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionCompro
 HEADERS_WS = {"Content-Type": "text/xml;charset=UTF-8","User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
-# --- ACTUALIZACIÓN: LOGGING COMPLETO Y SUGERENCIAS ---
+# --- LOGGING Y SUGERENCIAS ---
 def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
     URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
     
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     
-    # Payload básico
     payload = {
         "usuario": str(usuario), 
         "accion": str(detalle_accion)
     }
     
-    # Si hay sugerencia, la añadimos al payload para la columna nueva
     if sugerencia:
         payload["sugerencia"] = str(sugerencia)
         
     try: 
-        requests.post(URL_PUENTE, json=payload, timeout=5)
-    except: 
-        pass
+        # Aumentamos el timeout para asegurar que llegue
+        requests.post(URL_PUENTE, json=payload, timeout=8)
+    except Exception as e: 
+        print(f"Error de conexión: {e}")
 
 def cargar_usuarios():
     try:
@@ -80,10 +80,14 @@ def guardar_memoria():
 # --- 4. MOTOR DE EXTRACCIÓN XML ---
 def extraer_datos_robusto(xml_file):
     try:
+        # Asegurar lectura desde el inicio
         if isinstance(xml_file, (io.BytesIO, io.StringIO)): xml_file.seek(0)
+        
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
+        
+        # Desempaquetado SOAP
         for elem in root.iter():
             if 'comprobante' in elem.tag.lower() and elem.text and "<" in elem.text:
                 try:
@@ -93,6 +97,7 @@ def extraer_datos_robusto(xml_file):
                 except: continue
         if xml_data is None: xml_data = root
 
+        # Detección de Tipo
         root_tag = xml_data.tag.lower()
         if 'notacredito' in root_tag: tipo_doc = "NC"
         elif 'comprobanteretencion' in root_tag: tipo_doc = "RET"
@@ -218,36 +223,29 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
         f_num = wb.add_format({'num_format':'_-$ * #,##0.00_-','border':1})
         f_tot = wb.add_format({'bold':True,'num_format':'_-$ * #,##0.00_-','border':1,'bg_color':'#EFEFEF'})
         
-        # MODO SRI (Descarga Masiva)
         if sri_mode:
             df = pd.DataFrame(data_sri_lista)
             if sri_mode == "NC":
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
-                header_fmt = f_amar
-                sheet_name = "NOTAS DE CREDITO"
+                header_fmt = f_amar; sheet_name = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
                 cols = ["RUC CLIENTE","CLIENTE","FECHA","NOMBRE","RUC","SUSTENTO","N. FACTURA","RET RENTA","RET IVA","TOTAL RET","N AUTORIZACION"]
-                header_fmt = f_verd
-                sheet_name = "RETENCIONES"
-            else: # FC
+                header_fmt = f_verd; sheet_name = "RETENCIONES"
+            else: 
                 cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-                header_fmt = f_azul
-                sheet_name = "FACTURAS"
+                header_fmt = f_azul; sheet_name = "FACTURAS"
 
             for c in cols: 
                 if c not in df.columns: df[c] = ""
             df = df[cols]
-            
             ws = wb.add_worksheet(sheet_name)
             for i, c in enumerate(cols): ws.write(0, i, c, header_fmt)
             for r, row in enumerate(df.values, 1):
                 for c, val in enumerate(row): ws.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
             return output.getvalue()
 
-        # MODO MANUAL (INTEGRAL)
         meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-        # HOJA COMPRAS
         if data_compras:
             df_c = pd.DataFrame(data_compras)
             orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
@@ -262,12 +260,10 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             for r, row in enumerate(df_c.values, 1):
                 for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
             
-            # TOTAL COMPRAS
             ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
             for cidx in range(9, 19): 
                 l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
 
-            # HOJA REPORTE ANUAL
             ws_ra = wb.add_worksheet('REPORTE ANUAL')
             ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
             cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
@@ -276,7 +272,6 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
             
             cols_gasto = ["P","Q","R"] 
-            
             for r, mes in enumerate(meses):
                 fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
                 f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
@@ -288,7 +283,6 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             ws_ra.write(15,0,"TOTAL",f_tot)
             for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
 
-        # HOJA VENTAS
         if data_ventas_ret:
             df_v = pd.DataFrame(data_ventas_ret)
             orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
@@ -304,7 +298,6 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
             for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
 
-            # HOJA PROYECCION
             ws_p = wb.add_worksheet('PROYECCION')
             ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
             ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
@@ -348,7 +341,9 @@ with st.sidebar:
     sug_text = st.text_area("¿Qué podemos mejorar?", key="txt_sugerencia")
     if st.button("Enviar Sugerencia"):
         if sug_text:
-            registrar_actividad(st.session_state.usuario_actual, accion="ENVIÓ SUGERENCIA", sugerencia=sug_text)
+            with st.spinner("Enviando..."):
+                registrar_actividad(st.session_state.usuario_actual, accion="ENVIÓ SUGERENCIA", sugerencia=sug_text)
+                time.sleep(1) # Pequeña pausa para feedback visual
             st.success("¡Gracias! Tu opinión ha sido registrada.")
         else:
             st.warning("Escribe algo antes de enviar.")
@@ -393,23 +388,32 @@ with tab_sri:
             claves = list(dict.fromkeys(re.findall(r'\d{49}', up.read().decode("latin-1"))))
             if claves:
                 registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
-                bar = st.progress(0); lst = []
-                for i, cl in enumerate(claves):
-                    try:
-                        r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=5)
-                        if r.status_code==200: 
-                            d = extraer_datos_robusto(io.BytesIO(r.content))
-                            # Filtro estricto
-                            if d:
-                                if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
-                                elif tipo_filtro == "NC" and d["TIPO"] == "NC": lst.append(d)
-                                elif tipo_filtro == "FC" and d["TIPO"] in ["FC","LC"]: lst.append(d)
-                    except: pass
-                    bar.progress((i+1)/len(claves))
+                bar = st.progress(0); status = st.empty(); lst = []
+                zip_buffer = io.BytesIO()
+                
+                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
+                    for i, cl in enumerate(claves):
+                        try:
+                            r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=5)
+                            if r.status_code==200 and "<autorizaciones>" in r.text: 
+                                # Guardar en ZIP
+                                zf.writestr(f"{cl}.xml", r.text)
+                                # Extraer datos
+                                d = extraer_datos_robusto(io.BytesIO(r.content))
+                                if d:
+                                    if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
+                                    elif tipo_filtro == "NC" and d["TIPO"] == "NC": lst.append(d)
+                                    elif tipo_filtro == "FC" and d["TIPO"] in ["FC","LC"]: lst.append(d)
+                        except: pass
+                        bar.progress((i+1)/len(claves))
+                        status.text(f"Procesando {i+1}/{len(claves)}")
                 
                 if lst: 
+                    st.success(f"✅ Completado. {len(lst)} documentos procesados.")
                     registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL SRI {titulo}", len(lst))
-                    st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
+                    c1, c2 = st.columns(2)
+                    with c1: st.download_button(f"📦 ZIP XMLs {titulo}", zip_buffer.getvalue(), f"{titulo}.zip")
+                    with c2: st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
                 else:
                     st.warning("No se encontraron documentos válidos para este módulo.")
 
