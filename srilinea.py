@@ -91,6 +91,8 @@ def extraer_datos_robusto(xml_file):
             tag_lower = elem.tag.lower()
             if 'notacredito' in tag_lower: tipo_doc = "NC"
             elif 'liquidacioncompra' in tag_lower: tipo_doc = "LC"
+            elif 'retencion' in tag_lower: tipo_doc = "RET" # Detectamos retenciones
+            
             if 'comprobante' in tag_lower and elem.text:
                 try:
                     clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
@@ -106,8 +108,15 @@ def extraer_datos_robusto(xml_file):
             return "0"
 
         # Extracción básica
-        total = float(buscar(["importeTotal", "valorModificado", "total"]))
-        propina = float(buscar(["propina"])) # Nueva extracción específica
+        total = float(buscar(["importeTotal", "valorModificado", "total"])) # Nota: RET suele usar valorRetenido
+        if tipo_doc == "RET":
+            # Intento de extraer total retenido si es retención
+            total_ret = 0.0
+            for imp in xml_data.findall(".//impuesto"):
+                total_ret += float(imp.find("valorRetenido").text or 0)
+            if total == 0: total = total_ret
+            
+        propina = float(buscar(["propina"])) 
         
         # Inicialización de variables para desglose tributario
         base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
@@ -159,6 +168,8 @@ def extraer_datos_robusto(xml_file):
         subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
         
         ruc_comprador = buscar(["identificacionComprador"])
+        # Fallback para retenciones si comprador es sujeto retenido
+        if ruc_comprador == "0": ruc_comprador = buscar(["identificacionSujetoRetenido"])
 
         return {
             "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
@@ -201,8 +212,8 @@ def procesar_a_excel(lista_data):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
         fmt_contabilidad = '_-$ * #,##0.00_-;[Red]_-$ * -#,##0.00_-;_-$ * "-"??_-;_-@_-'
-        f_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#002060', 'font_color': 'white', 'text_wrap': True}) # Azul oscuro similar a la imagen
-        f_header_amarillo = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFD966', 'text_wrap': True}) # Amarillo similar a la imagen
+        f_header = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#002060', 'font_color': 'white', 'text_wrap': True}) 
+        f_header_amarillo = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFD966', 'text_wrap': True}) 
         f_subh = workbook.add_format({'bold': True, 'align': 'center', 'border': 1, 'bg_color': '#F2F2F2'})
         f_data_b = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': 'white'})
         f_data_g = workbook.add_format({'num_format': fmt_contabilidad, 'border': 1, 'bg_color': '#FAFAFA'})
@@ -211,16 +222,12 @@ def procesar_a_excel(lista_data):
         # --- HOJA COMPRAS ---
         ws_compras = workbook.add_worksheet('COMPRAS')
         
-        # Escribimos los encabezados manualmente para darles el color de tu imagen
-        # Columnas A hasta I (MES hasta MEMO) -> Azul (o estandard)
         for i, col_name in enumerate(orden):
             if col_name in ["OTRA BASE IVA", "OTRO IVA", "MONTO ICE"]:
                 ws_compras.write(0, i, col_name, f_header_amarillo)
             else:
                 ws_compras.write(0, i, col_name, f_header)
 
-        # Escribimos los datos
-        # Usamos to_excel pero saltamos el header porque ya lo pusimos con formato
         df.to_excel(writer, sheet_name='COMPRAS', startrow=1, header=False, index=False)
 
         # --- HOJA REPORTE ANUAL ---
@@ -240,19 +247,9 @@ def procesar_a_excel(lista_data):
 
         meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
         
-        # --- MAPEO DE COLUMNAS PARA FÓRMULAS ---
-        # A=0, B=1, ... I=8(MEMO), J=9(OTRA BASE), K=10(OTRO IVA), L=11(ICE), M=12(PROPINA), N=13(EXENTO)
-        # O=14(NO OBJ), P=15(BASE 0), Q=16(BASE 12), R=17(IVA), S=18(TOTAL)
-        
         col_memo = "I"
         col_detalle = "H"
-        
-        # Rango completo de valores para Profesional (Desde OTRA BASE hasta IVA) -> Columnas J hasta R
-        # Profesional suele declarar todo ingreso/gasto relacionado. Sumamos todas las bases e impuestos.
         cols_valores_profesional = ["J", "K", "L", "M", "N", "O", "P", "Q", "R"] 
-        
-        # Para Gastos Personales: Usualmente se suma Base 0 + Base 12 + IVA (El valor pagado deducible)
-        # Bases están en P, Q y el IVA en R.
         cols_valores_personales = ["P", "Q", "R"] 
 
         for r, mes in enumerate(meses):
@@ -260,14 +257,12 @@ def procesar_a_excel(lista_data):
             fmt = f_data_g if r % 2 != 0 else f_data_b
             ws_reporte.write(r+3, 0, mes.title(), fmt)
             
-            # 1. FÓRMULA PROFESIONALES
             parts_prof = []
             for letra in cols_valores_profesional:
                 parts_prof.append(f"SUMIFS('COMPRAS'!${letra}:${letra},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!${col_memo}:${col_memo},\"PROFESIONAL\")")
             f_prof = "=" + "+".join(parts_prof)
             ws_reporte.write_formula(r+3, 1, f_prof, fmt)
 
-            # 2. FÓRMULA GASTOS PERSONALES
             for c, cat in enumerate(cats):
                 parts_pers = []
                 for letra in cols_valores_personales:
@@ -275,10 +270,8 @@ def procesar_a_excel(lista_data):
                 f_pers = "=" + "+".join(parts_pers)
                 ws_reporte.write_formula(r+3, c+2, f_pers, fmt)
             
-            # Suma Total Fila
             ws_reporte.write_formula(r+3, 10, f"=SUM(B{fila_ex}:J{fila_ex})", fmt)
 
-        # Totales Finales
         for col in range(1, 11):
             letra = xlsxwriter.utility.xl_col_to_name(col)
             ws_reporte.write_formula(15, col, f"=SUM({letra}4:{letra}15)", f_total)
@@ -339,45 +332,60 @@ with tab_manual:
 
 with tab_sri:
     st.header("Descarga Masiva SRI")
-    up_txt = st.file_uploader(
-        "Subir Recibidos.txt del SRI", 
-        type=["txt"],
-        key=f"txt_uploader_{st.session_state.id_proceso}"
-    )
-    if up_txt and st.button("📥 INICIAR DESCARGA Y EXCEL"):
-        content = up_txt.read().decode("latin-1")
-        claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
-        
-        if claves:
-            barra = st.progress(0)
-            status = st.empty()
-            lista_sri = []
-            zip_buffer = io.BytesIO()
+    
+    # Función auxiliar para generar la interfaz de cada módulo
+    def generar_bloque_sri(titulo_modulo, tipo_log, key_suffix):
+        st.subheader(titulo_modulo)
+        up_txt = st.file_uploader(
+            f"Subir TXT para {titulo_modulo}", 
+            type=["txt"],
+            key=f"txt_{key_suffix}_{st.session_state.id_proceso}"
+        )
+        if up_txt and st.button(f"📥 DESCARGAR {titulo_modulo.upper()}", key=f"btn_{key_suffix}"):
+            content = up_txt.read().decode("latin-1")
+            claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
             
-            with zipfile.ZipFile(zip_buffer, "a") as zf:
-                for i, cl in enumerate(claves):
-                    payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                                      <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
-                                      </soapenv:Envelope>'''
-                    try:
-                        r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
-                        if r.status_code == 200 and "<autorizaciones>" in r.text:
-                            zf.writestr(f"{cl}.xml", r.text)
-                            xml_io = io.BytesIO(r.content)
-                            datos = extraer_datos_robusto(xml_io)
-                            if datos: lista_sri.append(datos)
-                    except: pass
-                    
-                    barra.progress((i + 1) / len(claves))
-                    status.text(f"Procesando {i+1} de {len(claves)}...")
+            if claves:
+                barra = st.progress(0)
+                status = st.empty()
+                lista_sri = []
+                zip_buffer = io.BytesIO()
+                
+                with zipfile.ZipFile(zip_buffer, "a") as zf:
+                    for i, cl in enumerate(claves):
+                        payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
+                                          <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
+                                          </soapenv:Envelope>'''
+                        try:
+                            r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
+                            if r.status_code == 200 and "<autorizaciones>" in r.text:
+                                zf.writestr(f"{cl}.xml", r.text)
+                                xml_io = io.BytesIO(r.content)
+                                datos = extraer_datos_robusto(xml_io)
+                                if datos: lista_sri.append(datos)
+                        except: pass
+                        
+                        barra.progress((i + 1) / len(claves))
+                        status.text(f"Procesando {i+1} de {len(claves)}...")
 
-            if lista_sri:
-                st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
-                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL SRI", len(lista_sri))
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
-                with col_b:
-                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
+                if lista_sri:
+                    st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
+                    registrar_actividad(st.session_state.usuario_actual, tipo_log, len(lista_sri))
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.download_button(f"📦 XMLs {key_suffix.upper()} (ZIP)", zip_buffer.getvalue(), f"{key_suffix}.zip", key=f"dl_zip_{key_suffix}")
+                    with col_b:
+                        st.download_button(f"📊 REPORTE {key_suffix.upper()}", procesar_a_excel(lista_sri), f"Reporte_{key_suffix}.xlsx", key=f"dl_xls_{key_suffix}")
 
+    # CREACIÓN DE LAS 3 SUB-PESTAÑAS
+    subtab_fc, subtab_nc, subtab_ret = st.tabs(["📄 Descarga Facturas", "💳 Descarga Notas Crédito", "📑 Descarga Retenciones"])
+
+    with subtab_fc:
+        generar_bloque_sri("Facturas", "GENERÓ FC SRI", "facturas")
+        
+    with subtab_nc:
+        generar_bloque_sri("Notas de Crédito", "GENERÓ NC SRI", "notas_credito")
+        
+    with subtab_ret:
+        generar_bloque_sri("Retenciones", "GENERÓ RET SRI", "retenciones")
 
