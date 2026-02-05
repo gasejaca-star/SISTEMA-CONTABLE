@@ -41,9 +41,13 @@ def cargar_usuarios():
     except:
         return {}
 
-# --- 2. SISTEMA DE LOGIN ---
+# --- 2. SISTEMA DE LOGIN Y ESTADO ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
+
+# Inicializamos el ID de proceso para limpiar archivos
+if "id_proceso" not in st.session_state:
+    st.session_state.id_proceso = 0
 
 if not st.session_state.autenticado:
     st.sidebar.title("🔐 Acceso Clientes")
@@ -133,35 +137,19 @@ def extraer_datos_robusto(xml_file):
             except: pass
             
         nombre_emisor = buscar(["razonSocial"]).upper().strip()
-        
-        # --- Lógica de Memoria Original ---
         info = st.session_state.memoria["empresas"].get(nombre_emisor, {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
-        
         items_raw = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
         subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
         
-        # --- Extracción de RUC Comprador ---
         ruc_comprador = buscar(["identificacionComprador"])
 
         return {
-            "MES": mes_nombre, 
-            "FECHA": fecha, 
-            "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
-            "TIPO DE DOCUMENTO": tipo_doc, 
-            "RUC": buscar(["ruc"]), 
-            "CONTRIBUYENTE": ruc_comprador, # NUEVO CAMPO
-            "NOMBRE": nombre_emisor,
-            "DETALLE": info["DETALLE"], 
-            "MEMO": info["MEMO"],
-            "NO IVA": no_iva * m, 
-            "MONTO ICE": ice_val * m, 
-            "OTRA BASE IVA": otra_base * m,
-            "OTRO MONTO IVA": otro_monto_iva * m, 
-            "BASE. 0": base_0 * m, 
-            "BASE. 12 / 15": base_12_15 * m,
-            "IVA.": iva_12_15 * m, 
-            "TOTAL": total * m, 
-            "SUBDETALLE": subdetalle
+            "MES": mes_nombre, "FECHA": fecha, "N. FACTURA": f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}",
+            "TIPO DE DOCUMENTO": tipo_doc, "RUC": buscar(["ruc"]), "CONTRIBUYENTE": ruc_comprador, "NOMBRE": nombre_emisor,
+            "DETALLE": info["DETALLE"], "MEMO": info["MEMO"],
+            "NO IVA": no_iva * m, "MONTO ICE": ice_val * m, "OTRA BASE IVA": otra_base * m,
+            "OTRO MONTO IVA": otro_monto_iva * m, "BASE. 0": base_0 * m, "BASE. 12 / 15": base_12_15 * m,
+            "IVA.": iva_12_15 * m, "TOTAL": total * m, "SUBDETALLE": subdetalle
         }
     except Exception: return None
 
@@ -169,9 +157,6 @@ def extraer_datos_robusto(xml_file):
 def procesar_a_excel(lista_data):
     df = pd.DataFrame(lista_data)
     
-    # NUEVO ORDEN DE COLUMNAS (Incluye CONTRIBUYENTE en posición F)
-    # A=MES, B=FECHA, C=N.FACT, D=TIPO, E=RUC, F=CONTRIBUYENTE, G=NOMBRE, H=DETALLE, I=MEMO
-    # J=NO IVA, K=ICE, L=OTRA BASE, M=OTRO MONTO, N=BASE 0, O=BASE 12, P=IVA, Q=TOTAL
     orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "CONTRIBUYENTE", "NOMBRE", "DETALLE", "MEMO", 
              "NO IVA", "MONTO ICE", "OTRA BASE IVA", "OTRO MONTO IVA", "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
     
@@ -213,25 +198,15 @@ def procesar_a_excel(lista_data):
             fmt = f_data_g if r % 2 != 0 else f_data_b
             ws_reporte.write(r+3, 0, mes.title(), fmt)
             
-            # --- FÓRMULAS AJUSTADAS POR DESPLAZAMIENTO DE COLUMNA ---
-            
-            # 1. PROFESIONALES: Suma de columnas de valores (NO IVA hasta BASE 12/15) si MEMO es "PROFESIONAL"
-            # Antes MEMO era H ($H:$H), ahora es I ($I:$I)
-            # Antes sumaba I, J, K, L, M, N. Ahora suma J, K, L, M, N, O.
-            
-            f_prof = (f"=SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"  # NO IVA
-                      f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"  # ICE
-                      f"SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"  # OTRA BASE
-                      f"SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"  # OTRO MONTO
-                      f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"  # BASE 0
-                      f"SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")")  # BASE 12/15
+            f_prof = (f"=SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"
+                      f"SUMIFS('COMPRAS'!$K:$K,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"
+                      f"SUMIFS('COMPRAS'!$L:$L,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"
+                      f"SUMIFS('COMPRAS'!$M:$M,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"
+                      f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")+"
+                      f"SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")")
             ws_reporte.write_formula(r+3, 1, f_prof, fmt)
 
             for c, cat in enumerate(cats):
-                # 2. GASTOS PERSONALES: Suma BASES (0 y 12) según la categoría en DETALLE
-                # Antes DETALLE era G ($G:$G), ahora es H ($H:$H)
-                # Antes sumaba M y N. Ahora suma N y O (Base 0 y Base 12/15).
-                
                 f_pers = (f"=SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")+"
                           f"SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")")
                 ws_reporte.write_formula(r+3, c+2, f_pers, fmt)
@@ -248,10 +223,20 @@ def procesar_a_excel(lista_data):
 # --- 6. INTERFAZ PRINCIPAL ---
 st.title(f"🚀 RAPIDITO - {st.session_state.usuario_actual}")
 
+# --- IMPLEMENTACIÓN DE BOTONES SIDEBAR ---
 with st.sidebar:
+    st.header("Menú Principal")
+    
+    # 1. BOTÓN NUEVO INFORME (Resetea los cargadores)
+    if st.button("🧹 NUEVO INFORME", type="primary"):
+        st.session_state.id_proceso += 1
+        st.rerun()
+
+    st.markdown("---")
+    
     if st.session_state.usuario_actual == "GABRIEL":
-        st.header("1. Herramientas Master")
-        uploaded_excel = st.file_uploader("Entrenar con Excel Maestro", type=["xlsx"])
+        st.header("Herramientas Master")
+        uploaded_excel = st.file_uploader("Entrenar con Excel Maestro", type=["xlsx"], key=f"entrena_{st.session_state.id_proceso}")
         if uploaded_excel:
             df_entrena = pd.read_excel(uploaded_excel)
             df_entrena.columns = [c.upper().strip() for c in df_entrena.columns]
@@ -265,6 +250,7 @@ with st.sidebar:
             guardar_memoria()
             st.success("Cerebro actualizado.")
     
+    st.markdown("---")
     if st.button("Cerrar Sesión"):
         registrar_actividad(st.session_state.usuario_actual, "SALIÓ")
         st.session_state.autenticado = False
@@ -274,53 +260,16 @@ tab_manual, tab_sri = st.tabs(["📂 Subir XMLs", "📡 Descarga SRI (TXT)"])
 
 with tab_manual:
     st.header("Subida de Comprobantes")
-    uploaded_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True)
+    # Agregamos la KEY dinámica
+    uploaded_xmls = st.file_uploader(
+        "Subir archivos XML", 
+        type=["xml"], 
+        accept_multiple_files=True,
+        key=f"xml_uploader_{st.session_state.id_proceso}" 
+    )
     if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
         lista_data = [extraer_datos_robusto(xml) for xml in uploaded_xmls if extraer_datos_robusto(xml)]
         if lista_data:
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL MANUAL", len(uploaded_xmls))
-            excel = procesar_a_excel(lista_data)
-            st.download_button("📥 DESCARGAR REPORTE", excel, f"Rapidito_{datetime.now().strftime('%H%M%S')}.xlsx")
-
-with tab_sri:
-    st.header("Descarga Masiva SRI")
-    up_txt = st.file_uploader("Subir Recibidos.txt del SRI", type=["txt"])
-    if up_txt and st.button("📥 INICIAR DESCARGA Y EXCEL"):
-        content = up_txt.read().decode("latin-1")
-        claves = list(dict.fromkeys(re.findall(r'\d{49}', content)))
-        
-        if claves:
-            barra = st.progress(0)
-            status = st.empty()
-            lista_sri = []
-            zip_buffer = io.BytesIO()
-            
-            with zipfile.ZipFile(zip_buffer, "a") as zf:
-                for i, cl in enumerate(claves):
-                    payload = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
-                                      <soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body>
-                                      </soapenv:Envelope>'''
-                    try:
-                        r = requests.post(URL_WS, data=payload, headers=HEADERS_WS, verify=False, timeout=10)
-                        if r.status_code == 200 and "<autorizaciones>" in r.text:
-                            zf.writestr(f"{cl}.xml", r.text)
-                            xml_io = io.BytesIO(r.content)
-                            datos = extraer_datos_robusto(xml_io)
-                            if datos: lista_sri.append(datos)
-                    except: pass
-                    
-                    barra.progress((i + 1) / len(claves))
-                    status.text(f"Procesando {i+1} de {len(claves)}...")
-
-            if lista_sri:
-                st.success(f"✅ ¡Éxito! Se procesaron {len(lista_sri)} comprobantes.")
-                registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL SRI", len(lista_sri))
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.download_button("📦 DESCARGAR XMLs (ZIP)", zip_buffer.getvalue(), "comprobantes.zip")
-                with col_b:
-                    st.download_button("📊 DESCARGAR EXCEL", procesar_a_excel(lista_sri), "Reporte_SRI.xlsx")
-
-
 
 
