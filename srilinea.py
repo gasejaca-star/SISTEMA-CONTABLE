@@ -19,11 +19,26 @@ URL_WS = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionCompro
 HEADERS_WS = {"Content-Type": "text/xml;charset=UTF-8","User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
 URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlNf0ETGNvpFYlsJ-161Sf6yHS7rSG_vc7JVEnTWGlIsixLRiM_tkosgXNQ0GZV/pub?output=csv"
 
-def registrar_actividad(usuario, accion, cantidad=None):
+# --- ACTUALIZACIÓN: LOGGING COMPLETO Y SUGERENCIAS ---
+def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
     URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
+    
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
-    try: requests.post(URL_PUENTE, json={"usuario": str(usuario), "accion": str(detalle_accion)}, timeout=5)
-    except: pass
+    
+    # Payload básico
+    payload = {
+        "usuario": str(usuario), 
+        "accion": str(detalle_accion)
+    }
+    
+    # Si hay sugerencia, la añadimos al payload para la columna nueva
+    if sugerencia:
+        payload["sugerencia"] = str(sugerencia)
+        
+    try: 
+        requests.post(URL_PUENTE, json=payload, timeout=5)
+    except: 
+        pass
 
 def cargar_usuarios():
     try:
@@ -260,16 +275,12 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
             ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
             
-            # Índices de columnas de valor en COMPRAS (0-based en Python, pero excel necesita letras)
-            # 15=P(Base0), 16=Q(Base12), 17=R(IVA) -> Bases Importantes para Gastos
             cols_gasto = ["P","Q","R"] 
             
             for r, mes in enumerate(meses):
                 fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
-                # Formula Profesional (Suma Bases + IVA si MEMO=PROFESIONAL)
                 f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
                 ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
-                # Formula Gastos Personales
                 for cidx, cat in enumerate(cats):
                     f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
                     ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
@@ -330,7 +341,18 @@ with st.sidebar:
             for _, r in df.iterrows():
                 nm = str(r.get("NOMBRE","")).upper().strip()
                 if nm: st.session_state.memoria["empresas"][nm] = {"DETALLE":str(r.get("DETALLE","OTROS")).upper(),"MEMO":str(r.get("MEMO","PROFESIONAL")).upper()}
-            guardar_memoria(); st.success("Memoria actualizada.")
+            guardar_memoria(); st.success("Memoria actualizada."); registrar_actividad(st.session_state.usuario_actual, "ACTUALIZÓ MEMORIA")
+
+    st.markdown("---")
+    st.header("📬 Buzón de Sugerencias")
+    sug_text = st.text_area("¿Qué podemos mejorar?", key="txt_sugerencia")
+    if st.button("Enviar Sugerencia"):
+        if sug_text:
+            registrar_actividad(st.session_state.usuario_actual, accion="ENVIÓ SUGERENCIA", sugerencia=sug_text)
+            st.success("¡Gracias! Tu opinión ha sido registrada.")
+        else:
+            st.warning("Escribe algo antes de enviar.")
+
     st.markdown("---")
     if st.button("Cerrar Sesión"):
         registrar_actividad(st.session_state.usuario_actual, "SALIÓ"); st.session_state.autenticado = False; st.rerun()
@@ -345,6 +367,7 @@ with tab_xml:
             data = [extraer_datos_robusto(x) for x in up_c]; data = [d for d in data if d and d["TIPO"] in ["FC","NC"]]
             if data:
                 st.session_state.data_compras_cache = data
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ REPORTE COMPRAS", len(data))
                 st.download_button("📥 Reporte Compras", generar_excel_multiexcel(data_compras=data), f"C_{datetime.now().strftime('%H%M')}.xlsx")
     with st2:
         up_v = st.file_uploader("Subir Ventas/Ret XML", type=["xml"], accept_multiple_files=True, key=f"v_{st.session_state.id_proceso}")
@@ -353,10 +376,12 @@ with tab_xml:
             if data:
                 res = procesar_ventas_con_retenciones(data)
                 st.session_state.data_ventas_cache = res
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ REPORTE VENTAS", len(res))
                 st.download_button("📥 Reporte Ventas", generar_excel_multiexcel(data_ventas_ret=res), f"V_{datetime.now().strftime('%H%M')}.xlsx")
     with st3:
         if st.button("Generar Informe Integral"):
             if st.session_state.data_compras_cache and st.session_state.data_ventas_cache:
+                registrar_actividad(st.session_state.usuario_actual, "GENERÓ INFORME INTEGRAL")
                 st.download_button("📥 INFORME INTEGRAL", generar_excel_multiexcel(st.session_state.data_compras_cache, st.session_state.data_ventas_cache), f"INT_{datetime.now().strftime('%H%M')}.xlsx")
             else: st.warning("Procese Compras y Ventas primero.")
 
@@ -367,19 +392,28 @@ with tab_sri:
         if up and st.button(f"Descargar {titulo}", key=f"b_{key}"):
             claves = list(dict.fromkeys(re.findall(r'\d{49}', up.read().decode("latin-1"))))
             if claves:
+                registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
                 bar = st.progress(0); lst = []
                 for i, cl in enumerate(claves):
                     try:
                         r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=5)
                         if r.status_code==200: 
                             d = extraer_datos_robusto(io.BytesIO(r.content))
-                            if d and d["TIPO"] == tipo_filtro: lst.append(d)
+                            # Filtro estricto
+                            if d:
+                                if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
+                                elif tipo_filtro == "NC" and d["TIPO"] == "NC": lst.append(d)
+                                elif tipo_filtro == "FC" and d["TIPO"] in ["FC","LC"]: lst.append(d)
                     except: pass
                     bar.progress((i+1)/len(claves))
-                if lst: st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
+                
+                if lst: 
+                    registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL SRI {titulo}", len(lst))
+                    st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
+                else:
+                    st.warning("No se encontraron documentos válidos para este módulo.")
 
     s1, s2, s3 = st.tabs(["Facturas", "Notas Crédito", "Retenciones"])
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
-
