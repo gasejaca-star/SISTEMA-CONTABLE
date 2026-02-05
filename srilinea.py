@@ -75,31 +75,46 @@ def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f:
         json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- 4. MOTOR DE EXTRACCIÓN XML (ADAPTADO PARA TODOS LOS TIPOS) ---
+# --- 4. MOTOR DE EXTRACCIÓN XML (CORREGIDO PARA DETECTAR TIPOS) ---
 def extraer_datos_robusto(xml_file):
     try:
+        # 1. Leer el archivo y buscar el contenido del comprobante
         if isinstance(xml_file, (io.BytesIO, io.StringIO)):
             xml_file.seek(0)
+        
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
-        tipo_doc = "FC" # Por defecto
         
-        # Detectar tipo de documento y limpiar XML
+        # Buscar el texto XML dentro de las etiquetas de respuesta SOAP
+        # Iteramos hasta encontrar la etiqueta 'comprobante' que tenga contenido CDATA (texto XML)
         for elem in root.iter():
-            tag_lower = elem.tag.lower()
-            if 'notacredito' in tag_lower: tipo_doc = "NC"
-            elif 'liquidacioncompra' in tag_lower: tipo_doc = "LC"
-            elif 'comprobanteretencion' in tag_lower: tipo_doc = "RET"
-            
-            if 'comprobante' in tag_lower and elem.text and "<" in elem.text:
+            if 'comprobante' in elem.tag.lower() and elem.text and "<" in elem.text:
                 try:
+                    # Limpiamos cabeceras XML que a veces vienen duplicadas
                     clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
                     xml_data = ET.fromstring(clean_text)
                     break
                 except: continue
-        if xml_data is None: xml_data = root
+        
+        # Si no se encontró dentro de 'comprobante', asumimos que el archivo YA ES el XML limpio
+        if xml_data is None: 
+            xml_data = root
 
+        # 2. DETERMINAR EL TIPO DE DOCUMENTO BASADO EN LA RAÍZ DEL XML PARSEADO
+        # Esta es la corrección clave: miramos la etiqueta raíz real del documento
+        root_tag = xml_data.tag.lower()
+        
+        if 'notacredito' in root_tag:
+            tipo_doc = "NC"
+        elif 'comprobanteretencion' in root_tag:
+            tipo_doc = "RET"
+        elif 'liquidacioncompra' in root_tag:
+            tipo_doc = "LC"
+        else:
+            tipo_doc = "FC" # Por defecto Factura
+
+        # Funciones auxiliares de búsqueda
         def buscar(tags):
             for t in tags:
                 f = xml_data.find(f".//{t}")
@@ -108,12 +123,11 @@ def extraer_datos_robusto(xml_file):
 
         def buscar_float(tags):
             val = buscar(tags)
-            return float(val) if val else 0.0
+            try:
+                return float(val) if val else 0.0
+            except: return 0.0
 
-        # --- DATOS COMUNES ---
-        info_tributaria = xml_data.find(".//infoTributaria")
-        info_factura = xml_data.find(".//infoFactura") or xml_data.find(".//infoNotaCredito") or xml_data.find(".//infoCompRetencion") or xml_data.find(".//infoLiquidacionCompra")
-        
+        # --- EXTRACCIÓN DE DATOS COMUNES ---
         razon_social = buscar(["razonSocial"])
         ruc_emisor = buscar(["ruc"])
         clave_acceso = buscar(["claveAcceso"])
@@ -123,16 +137,18 @@ def extraer_datos_robusto(xml_file):
         numero_completo = f"{estab}-{pto_emi}-{secuencial}"
         fecha_emision = buscar(["fechaEmision"])
         
-        # RUC y Nombre Receptor
+        # Autorización
+        num_autori = buscar(["numeroAutorizacion"]) 
+        if not num_autori: num_autori = clave_acceso # Fallback a clave de acceso si no hay num auto
+        
+        fec_autori = buscar(["fechaAutorizacion"]) 
+        if not fec_autori: fec_autori = fecha_emision # Fallback
+
+        # RUC y Nombre Receptor (Puede variar según documento)
         ruc_recep = buscar(["identificacionComprador", "identificacionSujetoRetenido"])
         nom_recep = buscar(["razonSocialComprador", "razonSocialSujetoRetenido"])
-        
-        # Autorización (si está disponible en el envoltorio o en el XML interno)
-        num_autori = buscar(["numeroAutorizacion"]) or clave_acceso
-        fec_autori = buscar(["fechaAutorizacion"]) or fecha_emision # Fallback
-        
-        # --- LÓGICA ESPECÍFICA POR TIPO ---
-        
+
+        # Diccionario base
         data_dict = {
             "TIPO": tipo_doc,
             "razonsocial": razon_social.upper(),
@@ -146,19 +162,21 @@ def extraer_datos_robusto(xml_file):
             "nomrecep": nom_recep.upper()
         }
 
-        # == CASO RETENCIONES (RET) ==
+        # === RAMA: RETENCIONES (RET) ===
         if tipo_doc == "RET":
             base_renta, rt_renta = 0.0, 0.0
             base_iva, rt_iva = 0.0, 0.0
             num_fact_sustento = ""
             
-            # Iterar impuestos retenidos
+            # Buscamos impuestos retenidos
             for imp in xml_data.findall(".//impuesto"):
                 codigo = imp.find("codigo").text if imp.find("codigo") is not None else ""
                 base = float(imp.find("baseImponible").text or 0)
                 valor = float(imp.find("valorRetenido").text or 0)
                 doc_sus = imp.find("numDocSustento").text if imp.find("numDocSustento") is not None else ""
-                if doc_sus: num_fact_sustento = doc_sus # Toma el último o único
+                
+                # Guardamos el último documento sustento encontrado
+                if doc_sus: num_fact_sustento = doc_sus
                 
                 if codigo == "1": # Renta
                     base_renta += base
@@ -177,53 +195,60 @@ def extraer_datos_robusto(xml_file):
             })
             return data_dict
 
-        # == CASO NOTAS DE CRÉDITO (NC) ==
+        # === RAMA: NOTAS DE CRÉDITO (NC) ===
         elif tipo_doc == "NC":
-            # Datos documento modificado
             num_doc_mod = buscar(["numDocModificado"])
             fec_doc_mod = buscar(["fechaEmisionDocSustento"])
-            motivo = buscar(["motivo"])
             
-            # Impuestos
-            base_0, base_12_15, base_no_obj, iva_val, total_val = 0.0, 0.0, 0.0, 0.0, 0.0
+            # Totales e Impuestos de la NC
+            total_val = buscar_float(["valorModificado", "importeTotal"])
             propina = buscar_float(["propina"])
             
-            total_val = buscar_float(["valorModificado"])
+            base_0, base_12_15, base_no_obj, iva_val = 0.0, 0.0, 0.0, 0.0
             
             for imp in xml_data.findall(".//totalImpuesto"):
-                cod = imp.find("codigo").text
-                cod_por = imp.find("codigoPorcentaje").text
+                cod = imp.find("codigo").text if imp.find("codigo") is not None else ""
+                cod_por = imp.find("codigoPorcentaje").text if imp.find("codigoPorcentaje") is not None else ""
                 base = float(imp.find("baseImponible").text or 0)
                 valor = float(imp.find("valor").text or 0)
                 
                 if cod == "2": # IVA
                     if cod_por == "0": base_0 += base
                     elif cod_por == "6": base_no_obj += base
-                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: # 12, 14, 15, etc.
+                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: 
                         base_12_15 += base
                         iva_val += valor
             
+            # Calcular días de diferencia (Opcional, se deja en 0 si falla)
+            dias_dif = 0
+            try:
+                f1 = datetime.strptime(fecha_emision, "%d/%m/%Y")
+                f2 = datetime.strptime(fec_doc_mod, "%d/%m/%Y")
+                dias_dif = (f1 - f2).days
+            except: pass
+
             data_dict.update({
-                "periodo": fecha_emision[:7].replace("-", "/"), # YYYY/MM
-                "coddocum": "04", # Codigo NC
+                "periodo": fecha_emision[6:] + "/" + fecha_emision[3:5], # YYYY/MM aprox
+                "coddocum": "04", # Código SRI para Nota de Crédito
                 "numdoc": num_doc_mod.replace("-", ""),
                 "fecdocum": fec_doc_mod,
                 "idrecep": ruc_recep,
+                "dias_dif": dias_dif,
                 "propina": propina,
                 "nc_base0": base_0,
                 "nc_noobjiva": base_no_obj,
-                "nc_baseimp": base_12_15, # Asumimos tarifa general
+                "nc_baseimp": base_12_15,
                 "nc_valiva": iva_val,
-                "poriva": "15%" if base_12_15 > 0 else "0%", # Estimado
-                "nc_baseimp5": 0.0, # Placeholder
-                "nc_valiva5": 0.0,  # Placeholder
+                "poriva": "15%" if base_12_15 > 0 else "0%",
+                "nc_baseimp5": 0.0,
+                "nc_valiva5": 0.0,
                 "nc_valtot": total_val
             })
             return data_dict
 
-        # == CASO FACTURAS (FC) / LIQUIDACIONES (LC) ==
+        # === RAMA: FACTURAS (FC) / LIQUIDACIONES (LC) ===
         else:
-            # Reutilizamos la lógica robusta anterior para facturas de gastos
+            # Lógica completa de desglose tributario para reporte de gastos
             total = buscar_float(["importeTotal", "total"])
             propina = buscar_float(["propina"])
             
@@ -237,15 +262,17 @@ def extraer_datos_robusto(xml_file):
                 base = float(imp.find("baseImponible").text or 0)
                 valor = float(imp.find("valor").text or 0)
                 
-                if cod == "2":
+                if cod == "2": # IVA
                     if cod_por == "0": base_0 += base
-                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: base_12_15 += base; iva_12_15 += valor
+                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: 
+                        base_12_15 += base; iva_12_15 += valor
                     elif cod_por == "6": no_obj_iva += base
                     elif cod_por == "7": exento_iva += base
                     else: otra_base += base; otro_monto_iva += valor
-                elif cod == "3": ice_val += valor
+                elif cod == "3": # ICE
+                    ice_val += valor
 
-            # Memoria
+            # Memoria de Gastos
             info = st.session_state.memoria["empresas"].get(razon_social.upper(), {"DETALLE": "OTROS", "MEMO": "PROFESIONAL"})
             items_raw = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
             subdetalle = " | ".join(items_raw[:5]) if items_raw else "Sin descripción"
@@ -278,41 +305,37 @@ def generar_excel_dinamico(lista_data, tipo_reporte):
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
-        fmt_date = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1})
-        fmt_num = workbook.add_format({'num_format': '0.00', 'border': 1})
-        fmt_txt = workbook.add_format({'border': 1})
         
         # === CASO 1: NOTAS DE CRÉDITO (AMARILLO) ===
         if tipo_reporte == "NC":
-            # Columnas según imagen
             cols_nc = ["razonsocial", "ruc_emisor", "claveacceso", "numautori", "fecautori", 
                        "secuenciales", "fechaemi", "dias_dif", "periodo", "coddocum", 
                        "numdoc", "fecdocum", "idrecep", "nomrecep", "propina", 
                        "nc_base0", "nc_noobjiva", "nc_baseimp", "poriva", "nc_valiva", 
                        "nc_baseimp5", "nc_valiva5", "nc_valtot"]
             
-            # Asegurar columnas
             for c in cols_nc: 
                 if c not in df.columns: df[c] = ""
-            df = df[cols_nc] # Reordenar
+            df = df[cols_nc]
             
-            # Formato Amarillo
             header_fmt = workbook.add_format({
                 'bold': True, 'align': 'center', 'valign': 'vcenter', 
                 'bg_color': '#FFFF00', 'font_color': 'black', 'border': 1
             })
+            data_fmt = workbook.add_format({'border': 1})
             
             ws = workbook.add_worksheet("NOTAS DE CREDITO")
             for col_num, value in enumerate(df.columns.values):
                 ws.write(0, col_num, value, header_fmt)
                 ws.set_column(col_num, col_num, 15)
                 
-            # Escribir datos
-            df.to_excel(writer, sheet_name='NOTAS DE CREDITO', startrow=1, header=False, index=False)
+            # Escribir filas manualmente para asegurar formato
+            for r_idx, row in enumerate(df.values, 1):
+                for c_idx, val in enumerate(row):
+                    ws.write(r_idx, c_idx, val, data_fmt)
             
         # === CASO 2: RETENCIONES (VERDE) ===
         elif tipo_reporte == "RET":
-            # Columnas según imagen
             cols_ret = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", 
                         "numfact", "numreten", "baserenta", "rt_renta", "baseiva", 
                         "rt_iva", "numautori", "fecautori"]
@@ -321,22 +344,23 @@ def generar_excel_dinamico(lista_data, tipo_reporte):
                 if c not in df.columns: df[c] = ""
             df = df[cols_ret]
             
-            # Formato Verde (#92D050 aprox)
             header_fmt = workbook.add_format({
                 'bold': True, 'align': 'center', 'valign': 'vcenter', 
                 'bg_color': '#92D050', 'font_color': 'black', 'border': 1
             })
+            data_fmt = workbook.add_format({'border': 1})
             
             ws = workbook.add_worksheet("RETENCIONES")
             for col_num, value in enumerate(df.columns.values):
                 ws.write(0, col_num, value, header_fmt)
                 ws.set_column(col_num, col_num, 18)
                 
-            df.to_excel(writer, sheet_name='RETENCIONES', startrow=1, header=False, index=False)
+            for r_idx, row in enumerate(df.values, 1):
+                for c_idx, val in enumerate(row):
+                    ws.write(r_idx, c_idx, val, data_fmt)
             
-        # === CASO 3: FACTURAS / GASTOS (AZUL - LÓGICA ANTERIOR) ===
+        # === CASO 3: FACTURAS / GASTOS (AZUL/AMARILLO) ===
         else:
-            # Usamos la lógica de reporte contable detallado
             orden = ["MES", "FECHA", "N. FACTURA", "TIPO DE DOCUMENTO", "RUC", "CONTRIBUYENTE", "NOMBRE", "DETALLE", "MEMO", 
                      "OTRA BASE IVA", "OTRO IVA", "MONTO ICE", "PROPINAS", "EXENTO DE IVA", "NO OBJ IVA", 
                      "BASE. 0", "BASE. 12 / 15", "IVA.", "TOTAL", "SUBDETALLE"]
@@ -356,11 +380,14 @@ def generar_excel_dinamico(lista_data, tipo_reporte):
                 fmt = f_header_amarillo if col_name in ["OTRA BASE IVA", "OTRO IVA", "MONTO ICE"] else f_header
                 ws_compras.write(0, i, col_name, fmt)
             
-            df.to_excel(writer, sheet_name='COMPRAS', startrow=1, header=False, index=False)
+            # Escribir datos COMPRAS
+            for r_idx, row in enumerate(df.values, 1):
+                for c_idx, val in enumerate(row):
+                    ws_compras.write(r_idx, c_idx, val, f_data_g)
             
-            # --- HOJA REPORTE ANUAL (Se mantiene igual que antes) ---
+            # --- REPORTE ANUAL ---
             ws_reporte = workbook.add_worksheet('REPORTE ANUAL')
-            # ... (Lógica de reporte anual sin cambios, solo copiando estructura)
+            ws_reporte.set_column('A:K', 14)
             ws_reporte.merge_range('B1:B2', "Negocios y\nServicios", f_header)
             cats = ["VIVIENDA", "SALUD", "EDUCACION", "ALIMENTACION", "VESTIMENTA", "TURISMO", "NO DEDUCIBLE", "SERVICIOS BASICOS"]
             iconos = ["🏠", "❤️", "🎓", "🛒", "🧢", "✈️", "🚫", "💡"]
@@ -427,7 +454,6 @@ with tab_manual:
     st.header("Subida de Comprobantes")
     uploaded_xmls = st.file_uploader("Subir archivos XML", type=["xml"], accept_multiple_files=True, key=f"xml_uploader_{st.session_state.id_proceso}")
     if uploaded_xmls and st.button("GENERAR EXCEL RAPIDITO"):
-        # Manual siempre asume formato de Facturas/Gastos detallado
         lista_data = [extraer_datos_robusto(xml) for xml in uploaded_xmls if extraer_datos_robusto(xml)]
         if lista_data:
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ EXCEL MANUAL", len(uploaded_xmls))
@@ -463,7 +489,7 @@ with tab_sri:
                                 xml_io = io.BytesIO(r.content)
                                 datos = extraer_datos_robusto(xml_io)
                                 if datos: 
-                                    # Filtro básico: solo agregar si el tipo coincide con lo esperado para evitar basura
+                                    # Filtro estricto para asegurar que cada módulo tenga lo suyo
                                     if codigo_reporte == "RET" and datos.get("TIPO") == "RET": lista_sri.append(datos)
                                     elif codigo_reporte == "NC" and datos.get("TIPO") == "NC": lista_sri.append(datos)
                                     elif codigo_reporte == "FC" and datos.get("TIPO") in ["FC", "LC"]: lista_sri.append(datos)
@@ -478,12 +504,10 @@ with tab_sri:
                     with col_a:
                         st.download_button(f"📦 XMLs {key_suffix.upper()} (ZIP)", zip_buffer.getvalue(), f"{key_suffix}.zip", key=f"dl_zip_{key_suffix}")
                     with col_b:
-                        # LLAMADA CLAVE: Pasamos el código de reporte correcto
                         st.download_button(f"📊 REPORTE {key_suffix.upper()}", generar_excel_dinamico(lista_sri, codigo_reporte), f"Reporte_{key_suffix}.xlsx", key=f"dl_xls_{key_suffix}")
                 else:
-                    st.warning("No se encontraron comprobantes válidos para este módulo.")
+                    st.warning("No se encontraron comprobantes válidos para este módulo. Verifique que el archivo TXT contenga claves de este tipo de documento.")
 
-    # PESTAÑAS
     subtab_fc, subtab_nc, subtab_ret = st.tabs(["📄 Descarga Facturas", "💳 Descarga Notas Crédito", "📑 Descarga Retenciones"])
 
     with subtab_fc:
