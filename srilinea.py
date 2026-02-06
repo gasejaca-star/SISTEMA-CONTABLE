@@ -79,7 +79,7 @@ def procesar_archivos_entrada(lista_archivos):
             try:
                 with zipfile.ZipFile(file) as z:
                     for filename in z.namelist():
-                        if filename.lower().endswith('.xml'):
+                        if filename.lower().endswith('.xml') and not filename.startswith('__MACOSX'):
                             xmls_procesables.append(io.BytesIO(z.read(filename)))
             except: pass
     return xmls_procesables
@@ -213,14 +213,14 @@ def extraer_datos_robusto(xml_file):
                 
                 if cod == "2": # IVA
                     if cod_por == "0": base_0 += base
-                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: # Tarifas normales
+                    elif cod_por in ["2", "3", "4", "8", "10"]: # Tarifas normales (12, 14, 15, 8)
                         base_12_15 += base; iva_12_15 += valor
                     elif cod_por == "6": no_obj_iva += base
                     elif cod_por == "7": exento_iva += base
-                    else: # CUALQUIER OTRA COSA (Inc. el 5% si viene con otro codigo, o antiguos)
+                    else: # CUALQUIER OTRA COSA (Inc. el 5% si viene con código 5 u otros)
                         otra_base += base; otro_monto_iva += valor
                 elif cod == "3": ice_val += valor
-                else: # Otros impuestos raros a la bolsa de 'Otros'
+                else: # Otros impuestos raros
                      otra_base += base; otro_monto_iva += valor
 
             # Memoria
@@ -321,84 +321,85 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             # Ajuste de ancho
             ws.set_column(0, len(cols)-1, 15)
             
-            return output.getvalue()
+            # NO return here, wait for context manager exit
 
         # === MODO MANUAL (INTEGRAL) ===
-        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+        else:
+            meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-        # HOJA COMPRAS
-        if data_compras:
-            df_c = pd.DataFrame(data_compras)
-            orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-            for c in orden_c: 
-                if c not in df_c.columns: df_c[c] = ""
-            df_c = df_c[orden_c]
-            
-            ws_c = wb.add_worksheet('COMPRAS')
-            for i, c in enumerate(orden_c):
-                # Amarillo para OTRA BASE hasta EXENTO (columnas especiales)
-                fmt = f_amar if i in range(9, 15) else f_azul
-                ws_c.write(0, i, c, fmt)
-            for r, row in enumerate(df_c.values, 1):
-                for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-            
-            ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
-            for cidx in range(9, 19): 
-                l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
+            # HOJA COMPRAS
+            if data_compras:
+                df_c = pd.DataFrame(data_compras)
+                orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
+                for c in orden_c: 
+                    if c not in df_c.columns: df_c[c] = ""
+                df_c = df_c[orden_c]
+                
+                ws_c = wb.add_worksheet('COMPRAS')
+                for i, c in enumerate(orden_c):
+                    # Amarillo para OTRA BASE hasta EXENTO (columnas especiales)
+                    fmt = f_amar if i in range(9, 15) else f_azul
+                    ws_c.write(0, i, c, fmt)
+                for r, row in enumerate(df_c.values, 1):
+                    for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+                
+                ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
+                for cidx in range(9, 19): 
+                    l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
 
-            # REPORTE ANUAL
-            ws_ra = wb.add_worksheet('REPORTE ANUAL')
-            ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
-            cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
-            icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
-            for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
-            ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
-            
-            cols_gasto = ["P","Q","R"] 
-            for r, mes in enumerate(meses):
-                fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
-                f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
-                ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
-                for cidx, cat in enumerate(cats):
-                    f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
-                    ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
-                ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
-            ws_ra.write(15,0,"TOTAL",f_tot)
-            for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
+                # REPORTE ANUAL
+                ws_ra = wb.add_worksheet('REPORTE ANUAL')
+                ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
+                cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
+                icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
+                for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
+                ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
+                
+                cols_gasto = ["P","Q","R"] 
+                for r, mes in enumerate(meses):
+                    fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
+                    f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
+                    ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
+                    for cidx, cat in enumerate(cats):
+                        f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
+                        ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
+                    ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
+                ws_ra.write(15,0,"TOTAL",f_tot)
+                for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
 
-        # HOJA VENTAS (CRUZADA)
-        if data_ventas_ret:
-            df_v = pd.DataFrame(data_ventas_ret)
-            orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
-            for c in orden_v: 
-                if c not in df_v.columns: df_v[c] = ""
-            df_v = df_v[orden_v]
-            
-            ws_v = wb.add_worksheet('VENTAS')
-            for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
-            for r, row in enumerate(df_v.values, 1):
-                for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-            
-            ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
-            for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
+            # HOJA VENTAS (CRUZADA)
+            if data_ventas_ret:
+                df_v = pd.DataFrame(data_ventas_ret)
+                orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
+                for c in orden_v: 
+                    if c not in df_v.columns: df_v[c] = ""
+                df_v = df_v[orden_v]
+                
+                ws_v = wb.add_worksheet('VENTAS')
+                for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
+                for r, row in enumerate(df_v.values, 1):
+                    for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+                
+                ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
+                for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
 
-            # PROYECCION
-            ws_p = wb.add_worksheet('PROYECCION')
-            ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
-            ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
-            for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
-            
-            for c, mes in enumerate(meses):
-                col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
-                ws_p.write(1, col, mes, f_azul)
-                ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
-                if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
-                else: ws_p.write(3, col, 0, f_num)
-                ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
-            
-            lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
-            ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
-            for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
+                # PROYECCION
+                ws_p = wb.add_worksheet('PROYECCION')
+                ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
+                ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
+                for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
+                
+                for c, mes in enumerate(meses):
+                    col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
+                    ws_p.write(1, col, mes, f_azul)
+                    ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
+                    if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
+                    else: ws_p.write(3, col, 0, f_num)
+                    ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
+                
+                lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
+                ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
+                for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
 
     return output.getvalue()
 
