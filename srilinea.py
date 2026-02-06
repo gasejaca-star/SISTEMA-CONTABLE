@@ -420,7 +420,13 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                     col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
                     ws_p.write(1, col, mes, f_azul)
                     ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
-                    if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
+                    if data_compras: ws_p.write_formula(3, col, 
+                            f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\") + "
+                            f"SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\") + "
+                            f"SUMIFS('COMPRAS'!$O:$O,'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\") + "
+                            f"SUMIFS('COMPRAS'!$N:$N,'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\") + "
+                            f"SUMIFS('COMPRAS'!$J:$J,'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\")", 
+                            f_num)
                     else: ws_p.write(3, col, 0, f_num)
                     ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
                 
@@ -540,3 +546,4 @@ with tab_sri:
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
+
