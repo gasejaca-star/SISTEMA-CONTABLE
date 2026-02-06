@@ -84,7 +84,7 @@ def procesar_archivos_entrada(lista_archivos):
             except: pass
     return xmls_procesables
 
-# --- 4. MOTOR DE EXTRACCIÓN XML (CON CORRECCIÓN V2.0) ---
+# --- 4. MOTOR DE EXTRACCIÓN XML (VERSION BLINDADA V2) ---
 def extraer_datos_robusto(xml_file):
     try:
         if isinstance(xml_file, (io.BytesIO, io.StringIO)): xml_file.seek(0)
@@ -92,34 +92,45 @@ def extraer_datos_robusto(xml_file):
         root = tree.getroot()
         xml_data = None
         
-        # Desempaquetar SOAP
+        # Desempaquetar SOAP (Búsqueda agresiva)
         for elem in root.iter():
-            if 'comprobante' in elem.tag.lower() and elem.text and "<" in elem.text:
+            # Buscamos etiquetas que parezcan 'comprobante' y tengan contenido XML dentro
+            if 'comprobante' in elem.tag.lower() and elem.text and ("<" in elem.text or "&lt;" in elem.text):
                 try:
                     clean_text = re.sub(r'<\?xml.*?\?>', '', elem.text).strip()
                     xml_data = ET.fromstring(clean_text)
                     break
                 except: continue
+        
+        # Si no estaba en SOAP, usamos la raíz
         if xml_data is None: xml_data = root
 
+        # Detección del tipo de documento
         root_tag = xml_data.tag.lower()
         if 'notacredito' in root_tag: tipo_doc = "NC"
         elif 'comprobanteretencion' in root_tag: tipo_doc = "RET"
         elif 'liquidacioncompra' in root_tag: tipo_doc = "LC"
         else: tipo_doc = "FC" 
 
+        # Funciones auxiliares seguras
         def buscar(tags):
             for t in tags:
                 f = xml_data.find(f".//{t}")
-                if f is not None and f.text: return f.text
+                if f is not None and f.text: return f.text.strip()
             return ""
+            
         def buscar_float(tags):
-            val = buscar(tags); return float(val) if val else 0.0
+            val_str = buscar(tags)
+            try: return float(val_str) if val_str else 0.0
+            except: return 0.0
 
         razon_social = buscar(["razonSocial"]).upper()
         ruc_emisor = buscar(["ruc"])
-        # Formato estricto 000-000-000000000
-        estab, pto, sec = buscar(["estab"]), buscar(["ptoEmi"]), buscar(["secuencial"])
+        
+        # Formato de factura
+        estab = buscar(["estab"]) or "000"
+        pto = buscar(["ptoEmi"]) or "000"
+        sec = buscar(["secuencial"]) or "000000000"
         num_fact_completo = f"{estab}-{pto}-{sec}"
         
         fecha_emision = buscar(["fechaEmision"])
@@ -132,7 +143,7 @@ def extraer_datos_robusto(xml_file):
                 mes_nombre = meses_dict.get(fecha_emision.split('/')[1], "DESCONOCIDO")
             except: pass
 
-        # Datos Base Receptor
+        # Datos del Cliente/Sujeto Retenido
         ruc_cliente = buscar(["identificacionComprador", "identificacionSujetoRetenido"])
         nombre_cliente = buscar(["razonSocialComprador", "razonSocialSujetoRetenido"]).upper()
 
@@ -143,39 +154,43 @@ def extraer_datos_robusto(xml_file):
             "CONTRIBUYENTE": ruc_cliente, "RUC CLIENTE": ruc_cliente, "CLIENTE": nombre_cliente 
         }
 
-        # === LÓGICA RETENCIONES (VERDE) - CORREGIDO ===
+        # === LÓGICA RETENCIONES (VERDE) ===
         if tipo_doc == "RET":
             rt_renta, rt_iva = 0.0, 0.0
             base_renta, base_iva = 0.0, 0.0
             sustento_formateado = ""
             
-            # 1. BÚSQUEDA DEL DOCUMENTO SUSTENTO (Compatible V1 y V2)
-            # Buscamos 'numDocSustento' en cualquier parte (V2 está en docSustento, V1 en infoCompRetencion o impuesto)
+            # 1. Búsqueda segura del sustento
             doc_sus_node = xml_data.find(".//numDocSustento")
-            doc_sus_raw = doc_sus_node.text if (doc_sus_node is not None and doc_sus_node.text) else ""
+            doc_sus_raw = doc_sus_node.text.strip() if (doc_sus_node is not None and doc_sus_node.text) else ""
             
-            # Formatear sustento a XXX-XXX-XXXXXXXXX para que cruce con ventas
             if doc_sus_raw:
                 parts = doc_sus_raw.replace('-','').strip()
-                if len(parts) >= 15: # Estructura completa
+                if len(parts) >= 15: 
                     sustento_formateado = f"{parts[0:3]}-{parts[3:6]}-{parts[6:]}"
-                elif len(doc_sus_raw.split('-')) == 3: # Ya viene con guiones
+                elif len(doc_sus_raw.split('-')) == 3:
                     sustento_formateado = doc_sus_raw
 
-            # 2. BÚSQUEDA DE VALORES (Compatible V1 "impuesto" y V2 "retencion")
-            # Unimos las dos búsquedas para asegurar que lea cualquier versión
+            # 2. Búsqueda de valores (Compatible V1 y V2)
             lista_retenciones = xml_data.findall(".//impuesto") + xml_data.findall(".//retencion")
 
             for item in lista_retenciones:
-                # En V2 a veces el código está en 'codigo' y en V1 también, pero validamos
-                cod = item.find("codigo").text if item.find("codigo") is not None else ""
+                # Código seguro
+                cod_node = item.find("codigo")
+                cod = cod_node.text.strip() if (cod_node is not None and cod_node.text) else ""
                 
-                # Extracción segura de valores
-                val_node = item.find("valorRetenido")
-                base_node = item.find("baseImponible")
-                
-                val = float(val_node.text) if (val_node is not None and val_node.text) else 0.0
-                base = float(base_node.text) if (base_node is not None and base_node.text) else 0.0
+                # Extracción segura de valores numéricos
+                try:
+                    val_node = item.find("valorRetenido")
+                    val_txt = val_node.text.strip() if (val_node is not None and val_node.text) else "0"
+                    val = float(val_txt)
+                except: val = 0.0
+
+                try:
+                    base_node = item.find("baseImponible")
+                    base_txt = base_node.text.strip() if (base_node is not None and base_node.text) else "0"
+                    base = float(base_txt)
+                except: base = 0.0
                 
                 if cod == "1": # Renta
                     rt_renta += val
@@ -184,14 +199,13 @@ def extraer_datos_robusto(xml_file):
                     rt_iva += val
                     base_iva += base
 
-            # Campos específicos para el reporte Verde
             base_data.update({
                 "ruc_recep": ruc_cliente,
                 "nomrecep": nombre_cliente,
                 "fechaemi": fecha_emision,
                 "razonsocial": razon_social,
                 "ruc_emisor": ruc_emisor,
-                "numfact": sustento_formateado, # DOCUMENTO SUSTENTO
+                "numfact": sustento_formateado, 
                 "numreten": num_fact_completo,
                 "baserenta": base_renta,
                 "rt_renta": rt_renta,
@@ -199,7 +213,7 @@ def extraer_datos_robusto(xml_file):
                 "rt_iva": rt_iva,
                 "numautori": num_autori,
                 "fecautori": buscar(["fechaAutorizacion"]) or fecha_emision,
-                "SUSTENTO": sustento_formateado, # Para cruce interno
+                "SUSTENTO": sustento_formateado,
                 "TOTAL RET": rt_renta + rt_iva
             })
             return base_data
@@ -209,27 +223,30 @@ def extraer_datos_robusto(xml_file):
             m = -1 if tipo_doc == "NC" else 1
             total = buscar_float(["importeTotal", "total", "valorModificado"]) * m
             propina = buscar_float(["propina"]) * m
+            
             base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
             no_obj_iva, exento_iva = 0.0, 0.0
             otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
             
             for imp in xml_data.findall(".//totalImpuesto"):
-                cod = imp.find("codigo").text
-                cod_por = imp.find("codigoPorcentaje").text
-                base = float(imp.find("baseImponible").text or 0) * m
-                valor = float(imp.find("valor").text or 0) * m
-                
-                if cod == "2": # IVA
-                    if cod_por == "0": base_0 += base
-                    elif cod_por in ["2", "3", "4", "8", "10"]: # Tarifas normales (12, 14, 15, 8)
-                        base_12_15 += base; iva_12_15 += valor
-                    elif cod_por == "6": no_obj_iva += base
-                    elif cod_por == "7": exento_iva += base
-                    else: # CUALQUIER OTRA COSA (Inc. el 5% si viene con código 5 u otros)
-                        otra_base += base; otro_monto_iva += valor
-                elif cod == "3": ice_val += valor
-                else: # Otros impuestos raros
-                     otra_base += base; otro_monto_iva += valor
+                try:
+                    cod = imp.find("codigo").text
+                    cod_por = imp.find("codigoPorcentaje").text
+                    base = float(imp.find("baseImponible").text or 0) * m
+                    valor = float(imp.find("valor").text or 0) * m
+                    
+                    if cod == "2": # IVA
+                        if cod_por == "0": base_0 += base
+                        elif cod_por in ["2", "3", "4", "8", "10"]:
+                            base_12_15 += base; iva_12_15 += valor
+                        elif cod_por == "6": no_obj_iva += base
+                        elif cod_por == "7": exento_iva += base
+                        else:
+                            otra_base += base; otro_monto_iva += valor
+                    elif cod == "3": ice_val += valor
+                    else:
+                         otra_base += base; otro_monto_iva += valor
+                except: continue 
 
             # Memoria
             if tipo_doc == "NC":
@@ -251,7 +268,9 @@ def extraer_datos_robusto(xml_file):
                 "IVA.": iva_12_15, "TOTAL": total
             })
             return base_data
-    except: return None
+    except Exception as e:
+        print(f"Error procesando XML: {e}")
+        return None
 
 # --- 5. LÓGICA DE INTEGRACIÓN (CRUCE VENTAS) ---
 def procesar_ventas_con_retenciones(lista_datos_crudos):
@@ -521,5 +540,3 @@ with tab_sri:
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
-
-
