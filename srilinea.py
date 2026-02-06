@@ -68,7 +68,7 @@ if 'memoria' not in st.session_state:
 def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f: json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- HELPER: DESCOMPRIMIR ZIP Y XMLs (NUEVO) ---
+# --- HELPER: DESCOMPRIMIR ZIP Y XMLs ---
 def procesar_archivos_entrada(lista_archivos):
     """Recibe lista de UploadedFile (XML o ZIP) y devuelve lista de BytesIO solo con XMLs"""
     xmls_procesables = []
@@ -84,7 +84,7 @@ def procesar_archivos_entrada(lista_archivos):
             except: pass
     return xmls_procesables
 
-# --- 4. MOTOR DE EXTRACCIÓN XML ---
+# --- 4. MOTOR DE EXTRACCIÓN XML (CON CORRECCIÓN V2.0) ---
 def extraer_datos_robusto(xml_file):
     try:
         if isinstance(xml_file, (io.BytesIO, io.StringIO)): xml_file.seek(0)
@@ -140,21 +140,19 @@ def extraer_datos_robusto(xml_file):
             "TIPO": tipo_doc, "TIPO DE DOCUMENTO": tipo_doc,
             "MES": mes_nombre, "FECHA": fecha_emision, "N. FACTURA": num_fact_completo, 
             "RUC": ruc_emisor, "NOMBRE": razon_social, "N AUTORIZACION": num_autori,
-            "CONTRIBUYENTE": ruc_cliente, "RUC CLIENTE": ruc_cliente, "CLIENTE": nombre_cliente # Alias para compatibilidad
+            "CONTRIBUYENTE": ruc_cliente, "RUC CLIENTE": ruc_cliente, "CLIENTE": nombre_cliente 
         }
 
-        # === LÓGICA RETENCIONES (VERDE) ===
+        # === LÓGICA RETENCIONES (VERDE) - CORREGIDO ===
         if tipo_doc == "RET":
             rt_renta, rt_iva = 0.0, 0.0
             base_renta, base_iva = 0.0, 0.0
             sustento_formateado = ""
             
-            # Buscar info de documento sustento (para cruce con ventas)
-            doc_sus_raw = ""
-            # Buscamos en el primer impuesto que tenga sustento, suele ser suficiente
-            imp_check = xml_data.find(".//impuesto")
-            if imp_check is not None:
-                doc_sus_raw = imp_check.find("numDocSustento").text if imp_check.find("numDocSustento") is not None else ""
+            # 1. BÚSQUEDA DEL DOCUMENTO SUSTENTO (Compatible V1 y V2)
+            # Buscamos 'numDocSustento' en cualquier parte (V2 está en docSustento, V1 en infoCompRetencion o impuesto)
+            doc_sus_node = xml_data.find(".//numDocSustento")
+            doc_sus_raw = doc_sus_node.text if (doc_sus_node is not None and doc_sus_node.text) else ""
             
             # Formatear sustento a XXX-XXX-XXXXXXXXX para que cruce con ventas
             if doc_sus_raw:
@@ -164,10 +162,20 @@ def extraer_datos_robusto(xml_file):
                 elif len(doc_sus_raw.split('-')) == 3: # Ya viene con guiones
                     sustento_formateado = doc_sus_raw
 
-            for imp in xml_data.findall(".//impuesto"):
-                cod = imp.find("codigo").text
-                val = float(imp.find("valorRetenido").text or 0)
-                base = float(imp.find("baseImponible").text or 0)
+            # 2. BÚSQUEDA DE VALORES (Compatible V1 "impuesto" y V2 "retencion")
+            # Unimos las dos búsquedas para asegurar que lea cualquier versión
+            lista_retenciones = xml_data.findall(".//impuesto") + xml_data.findall(".//retencion")
+
+            for item in lista_retenciones:
+                # En V2 a veces el código está en 'codigo' y en V1 también, pero validamos
+                cod = item.find("codigo").text if item.find("codigo") is not None else ""
+                
+                # Extracción segura de valores
+                val_node = item.find("valorRetenido")
+                base_node = item.find("baseImponible")
+                
+                val = float(val_node.text) if (val_node is not None and val_node.text) else 0.0
+                base = float(base_node.text) if (base_node is not None and base_node.text) else 0.0
                 
                 if cod == "1": # Renta
                     rt_renta += val
