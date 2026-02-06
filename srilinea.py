@@ -35,10 +35,10 @@ def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
         payload["sugerencia"] = str(sugerencia)
         
     try: 
-        # Aumentamos el timeout para asegurar que llegue
         requests.post(URL_PUENTE, json=payload, timeout=8)
-    except Exception as e: 
-        print(f"Error de conexión: {e}")
+        return True
+    except Exception as e:
+        return False
 
 def cargar_usuarios():
     try:
@@ -80,14 +80,12 @@ def guardar_memoria():
 # --- 4. MOTOR DE EXTRACCIÓN XML ---
 def extraer_datos_robusto(xml_file):
     try:
-        # Asegurar lectura desde el inicio
         if isinstance(xml_file, (io.BytesIO, io.StringIO)): xml_file.seek(0)
         
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
         
-        # Desempaquetado SOAP
         for elem in root.iter():
             if 'comprobante' in elem.tag.lower() and elem.text and "<" in elem.text:
                 try:
@@ -97,7 +95,6 @@ def extraer_datos_robusto(xml_file):
                 except: continue
         if xml_data is None: xml_data = root
 
-        # Detección de Tipo
         root_tag = xml_data.tag.lower()
         if 'notacredito' in root_tag: tipo_doc = "NC"
         elif 'comprobanteretencion' in root_tag: tipo_doc = "RET"
@@ -144,7 +141,7 @@ def extraer_datos_robusto(xml_file):
             base_data.update({"RET RENTA": rt_renta, "RET IVA": rt_iva, "TOTAL RET": rt_renta + rt_iva, "SUSTENTO": sustento_formateado})
             return base_data
 
-        else: # FC, LC o NC
+        else: 
             m = -1 if tipo_doc == "NC" else 1
             total = buscar_float(["importeTotal", "total", "valorModificado"]) * m
             propina = buscar_float(["propina"]) * m
@@ -211,9 +208,12 @@ def procesar_ventas_con_retenciones(lista_datos_crudos):
         ventas_integradas.append(fila)
     return ventas_integradas
 
-# --- 6. GENERADOR MULTI-EXCEL MAESTRO ---
+# --- 6. GENERADOR MULTI-EXCEL MAESTRO (CORREGIDO) ---
 def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_lista=None, sri_mode=None):
     output = io.BytesIO()
+    
+    # IMPORTANTE: Todo el trabajo con 'writer' debe estar dentro del 'with'.
+    # NO usar 'return' dentro del bloque 'with', porque interrumpe el guardado.
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         wb = writer.book
         f_azul = wb.add_format({'bold':True,'align':'center','border':1,'bg_color':'#002060','font_color':'white'})
@@ -223,6 +223,7 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
         f_num = wb.add_format({'num_format':'_-$ * #,##0.00_-','border':1})
         f_tot = wb.add_format({'bold':True,'num_format':'_-$ * #,##0.00_-','border':1,'bg_color':'#EFEFEF'})
         
+        # === MODO SRI (Descarga Masiva) ===
         if sri_mode:
             df = pd.DataFrame(data_sri_lista)
             if sri_mode == "NC":
@@ -242,79 +243,85 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             for i, c in enumerate(cols): ws.write(0, i, c, header_fmt)
             for r, row in enumerate(df.values, 1):
                 for c, val in enumerate(row): ws.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-            return output.getvalue()
+        
+        # === MODO MANUAL (INTEGRAL) ===
+        else:
+            meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+            # HOJA COMPRAS
+            if data_compras:
+                df_c = pd.DataFrame(data_compras)
+                orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
+                for c in orden_c: 
+                    if c not in df_c.columns: df_c[c] = ""
+                df_c = df_c[orden_c]
+                
+                ws_c = wb.add_worksheet('COMPRAS')
+                for i, c in enumerate(orden_c):
+                    fmt = f_amar if i in range(9, 19) else f_azul
+                    ws_c.write(0, i, c, fmt)
+                for r, row in enumerate(df_c.values, 1):
+                    for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+                
+                ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
+                for cidx in range(9, 19): 
+                    l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
 
-        if data_compras:
-            df_c = pd.DataFrame(data_compras)
-            orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-            for c in orden_c: 
-                if c not in df_c.columns: df_c[c] = ""
-            df_c = df_c[orden_c]
-            
-            ws_c = wb.add_worksheet('COMPRAS')
-            for i, c in enumerate(orden_c):
-                fmt = f_amar if i in range(9, 19) else f_azul
-                ws_c.write(0, i, c, fmt)
-            for r, row in enumerate(df_c.values, 1):
-                for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-            
-            ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
-            for cidx in range(9, 19): 
-                l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
+                # REPORTE ANUAL
+                ws_ra = wb.add_worksheet('REPORTE ANUAL')
+                ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
+                cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
+                icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
+                for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
+                ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
+                
+                cols_gasto = ["P","Q","R"] 
+                for r, mes in enumerate(meses):
+                    fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
+                    f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
+                    ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
+                    for cidx, cat in enumerate(cats):
+                        f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
+                        ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
+                    ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
+                ws_ra.write(15,0,"TOTAL",f_tot)
+                for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
 
-            ws_ra = wb.add_worksheet('REPORTE ANUAL')
-            ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
-            cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
-            icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
-            for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
-            ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
-            
-            cols_gasto = ["P","Q","R"] 
-            for r, mes in enumerate(meses):
-                fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
-                f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
-                ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
-                for cidx, cat in enumerate(cats):
-                    f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
-                    ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
-                ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
-            ws_ra.write(15,0,"TOTAL",f_tot)
-            for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
+            # HOJA VENTAS
+            if data_ventas_ret:
+                df_v = pd.DataFrame(data_ventas_ret)
+                orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
+                for c in orden_v: 
+                    if c not in df_v.columns: df_v[c] = ""
+                df_v = df_v[orden_v]
+                
+                ws_v = wb.add_worksheet('VENTAS')
+                for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
+                for r, row in enumerate(df_v.values, 1):
+                    for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+                
+                ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
+                for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
 
-        if data_ventas_ret:
-            df_v = pd.DataFrame(data_ventas_ret)
-            orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
-            for c in orden_v: 
-                if c not in df_v.columns: df_v[c] = ""
-            df_v = df_v[orden_v]
-            
-            ws_v = wb.add_worksheet('VENTAS')
-            for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
-            for r, row in enumerate(df_v.values, 1):
-                for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-            
-            ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
-            for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
+                # PROYECCION
+                ws_p = wb.add_worksheet('PROYECCION')
+                ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
+                ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
+                for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
+                
+                for c, mes in enumerate(meses):
+                    col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
+                    ws_p.write(1, col, mes, f_azul)
+                    ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
+                    if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
+                    else: ws_p.write(3, col, 0, f_num)
+                    ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
+                
+                lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
+                ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
+                for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
 
-            ws_p = wb.add_worksheet('PROYECCION')
-            ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
-            ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
-            for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
-            
-            for c, mes in enumerate(meses):
-                col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
-                ws_p.write(1, col, mes, f_azul)
-                ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
-                if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
-                else: ws_p.write(3, col, 0, f_num)
-                ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
-            
-            lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
-            ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
-            for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
-
+    # Ahora que salimos del bloque 'with', el archivo se guardó y cerró correctamente.
     return output.getvalue()
 
 # --- 7. INTERFAZ ---
@@ -342,9 +349,10 @@ with st.sidebar:
     if st.button("Enviar Sugerencia"):
         if sug_text:
             with st.spinner("Enviando..."):
-                registrar_actividad(st.session_state.usuario_actual, accion="ENVIÓ SUGERENCIA", sugerencia=sug_text)
-                time.sleep(1) # Pequeña pausa para feedback visual
-            st.success("¡Gracias! Tu opinión ha sido registrada.")
+                exito = registrar_actividad(st.session_state.usuario_actual, accion="ENVIÓ SUGERENCIA", sugerencia=sug_text)
+                time.sleep(1) 
+            if exito: st.success("¡Gracias! Tu opinión ha sido registrada.")
+            else: st.error("No se pudo enviar. Revisa tu conexión.")
         else:
             st.warning("Escribe algo antes de enviar.")
 
@@ -396,9 +404,7 @@ with tab_sri:
                         try:
                             r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=5)
                             if r.status_code==200 and "<autorizaciones>" in r.text: 
-                                # Guardar en ZIP
                                 zf.writestr(f"{cl}.xml", r.text)
-                                # Extraer datos
                                 d = extraer_datos_robusto(io.BytesIO(r.content))
                                 if d:
                                     if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
