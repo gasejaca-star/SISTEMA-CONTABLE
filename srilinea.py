@@ -68,7 +68,7 @@ if 'memoria' not in st.session_state:
 def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f: json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
-# --- HELPER: DESCOMPRIMIR ZIP Y XMLs ---
+# --- HELPER: DESCOMPRIMIR ZIP Y XMLs (NUEVO) ---
 def procesar_archivos_entrada(lista_archivos):
     """Recibe lista de UploadedFile (XML o ZIP) y devuelve lista de BytesIO solo con XMLs"""
     xmls_procesables = []
@@ -512,5 +512,4 @@ with tab_sri:
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
-
 
