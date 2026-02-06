@@ -275,7 +275,7 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
                 ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
                 
-                cols_gasto = ["P","Q","R"] 
+                cols_gasto = ["P","Q","O"] 
                 for r, mes in enumerate(meses):
                     fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
                     f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","O"]])
@@ -427,4 +427,5 @@ with tab_sri:
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
+
 
