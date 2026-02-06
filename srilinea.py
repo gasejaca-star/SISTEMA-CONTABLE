@@ -23,22 +23,13 @@ URL_SHEET = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrwp5uUSVg8g7SfFlN
 # --- LOGGING Y SUGERENCIAS ---
 def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
     URL_PUENTE = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
-    
     detalle_accion = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
-    
-    payload = {
-        "usuario": str(usuario), 
-        "accion": str(detalle_accion)
-    }
-    
-    if sugerencia:
-        payload["sugerencia"] = str(sugerencia)
-        
+    payload = {"usuario": str(usuario), "accion": str(detalle_accion)}
+    if sugerencia: payload["sugerencia"] = str(sugerencia)
     try: 
         requests.post(URL_PUENTE, json=payload, timeout=8)
         return True
-    except Exception as e:
-        return False
+    except: return False
 
 def cargar_usuarios():
     try:
@@ -77,15 +68,31 @@ if 'memoria' not in st.session_state:
 def guardar_memoria():
     with open("conocimiento_contable.json", "w", encoding="utf-8") as f: json.dump(st.session_state.memoria, f, indent=4, ensure_ascii=False)
 
+# --- HELPER: DESCOMPRIMIR ZIP Y XMLs ---
+def procesar_archivos_entrada(lista_archivos):
+    """Recibe lista de UploadedFile (XML o ZIP) y devuelve lista de BytesIO solo con XMLs"""
+    xmls_procesables = []
+    for file in lista_archivos:
+        if file.name.lower().endswith('.xml'):
+            xmls_procesables.append(io.BytesIO(file.getvalue()))
+        elif file.name.lower().endswith('.zip'):
+            try:
+                with zipfile.ZipFile(file) as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith('.xml'):
+                            xmls_procesables.append(io.BytesIO(z.read(filename)))
+            except: pass
+    return xmls_procesables
+
 # --- 4. MOTOR DE EXTRACCIÓN XML ---
 def extraer_datos_robusto(xml_file):
     try:
         if isinstance(xml_file, (io.BytesIO, io.StringIO)): xml_file.seek(0)
-        
         tree = ET.parse(xml_file)
         root = tree.getroot()
         xml_data = None
         
+        # Desempaquetar SOAP
         for elem in root.iter():
             if 'comprobante' in elem.tag.lower() and elem.text and "<" in elem.text:
                 try:
@@ -111,7 +118,10 @@ def extraer_datos_robusto(xml_file):
 
         razon_social = buscar(["razonSocial"]).upper()
         ruc_emisor = buscar(["ruc"])
-        num_fact_completo = f"{buscar(['estab'])}-{buscar(['ptoEmi'])}-{buscar(['secuencial'])}"
+        # Formato estricto 000-000-000000000
+        estab, pto, sec = buscar(["estab"]), buscar(["ptoEmi"]), buscar(["secuencial"])
+        num_fact_completo = f"{estab}-{pto}-{sec}"
+        
         fecha_emision = buscar(["fechaEmision"])
         num_autori = buscar(["numeroAutorizacion"]) or buscar(["claveAcceso"])
         
@@ -122,46 +132,98 @@ def extraer_datos_robusto(xml_file):
                 mes_nombre = meses_dict.get(fecha_emision.split('/')[1], "DESCONOCIDO")
             except: pass
 
+        # Datos Base Receptor
+        ruc_cliente = buscar(["identificacionComprador", "identificacionSujetoRetenido"])
+        nombre_cliente = buscar(["razonSocialComprador", "razonSocialSujetoRetenido"]).upper()
+
         base_data = {
-            "TIPO": tipo_doc,
-            "TIPO DE DOCUMENTO": tipo_doc,
-            "MES": mes_nombre, "FECHA": fecha_emision, "N. FACTURA": num_fact_completo, "RUC": ruc_emisor, "NOMBRE": razon_social, "N AUTORIZACION": num_autori
+            "TIPO": tipo_doc, "TIPO DE DOCUMENTO": tipo_doc,
+            "MES": mes_nombre, "FECHA": fecha_emision, "N. FACTURA": num_fact_completo, 
+            "RUC": ruc_emisor, "NOMBRE": razon_social, "N AUTORIZACION": num_autori,
+            "CONTRIBUYENTE": ruc_cliente, "RUC CLIENTE": ruc_cliente, "CLIENTE": nombre_cliente # Alias para compatibilidad
         }
 
+        # === LÓGICA RETENCIONES (VERDE) ===
         if tipo_doc == "RET":
             rt_renta, rt_iva = 0.0, 0.0
+            base_renta, base_iva = 0.0, 0.0
             sustento_formateado = ""
-            for imp in xml_data.findall(".//impuesto"):
-                cod = imp.find("codigo").text; val = float(imp.find("valorRetenido").text or 0)
-                if cod == "1": rt_renta += val
-                elif cod == "2": rt_iva += val
-                doc_sus = imp.find("numDocSustento").text if imp.find("numDocSustento") is not None else ""
-                if doc_sus and "-" in doc_sus: sustento_formateado = doc_sus
+            
+            # Buscar info de documento sustento (para cruce con ventas)
+            doc_sus_raw = ""
+            # Buscamos en el primer impuesto que tenga sustento, suele ser suficiente
+            imp_check = xml_data.find(".//impuesto")
+            if imp_check is not None:
+                doc_sus_raw = imp_check.find("numDocSustento").text if imp_check.find("numDocSustento") is not None else ""
+            
+            # Formatear sustento a XXX-XXX-XXXXXXXXX para que cruce con ventas
+            if doc_sus_raw:
+                parts = doc_sus_raw.replace('-','').strip()
+                if len(parts) >= 15: # Estructura completa
+                    sustento_formateado = f"{parts[0:3]}-{parts[3:6]}-{parts[6:]}"
+                elif len(doc_sus_raw.split('-')) == 3: # Ya viene con guiones
+                    sustento_formateado = doc_sus_raw
 
-            base_data.update({"RET RENTA": rt_renta, "RET IVA": rt_iva, "TOTAL RET": rt_renta + rt_iva, "SUSTENTO": sustento_formateado})
+            for imp in xml_data.findall(".//impuesto"):
+                cod = imp.find("codigo").text
+                val = float(imp.find("valorRetenido").text or 0)
+                base = float(imp.find("baseImponible").text or 0)
+                
+                if cod == "1": # Renta
+                    rt_renta += val
+                    base_renta += base
+                elif cod == "2": # IVA
+                    rt_iva += val
+                    base_iva += base
+
+            # Campos específicos para el reporte Verde
+            base_data.update({
+                "ruc_recep": ruc_cliente,
+                "nomrecep": nombre_cliente,
+                "fechaemi": fecha_emision,
+                "razonsocial": razon_social,
+                "ruc_emisor": ruc_emisor,
+                "numfact": sustento_formateado, # DOCUMENTO SUSTENTO
+                "numreten": num_fact_completo,
+                "baserenta": base_renta,
+                "rt_renta": rt_renta,
+                "baseiva": base_iva,
+                "rt_iva": rt_iva,
+                "numautori": num_autori,
+                "fecautori": buscar(["fechaAutorizacion"]) or fecha_emision,
+                "SUSTENTO": sustento_formateado, # Para cruce interno
+                "TOTAL RET": rt_renta + rt_iva
+            })
             return base_data
 
+        # === LÓGICA FACTURAS / NC / LC ===
         else: 
             m = -1 if tipo_doc == "NC" else 1
             total = buscar_float(["importeTotal", "total", "valorModificado"]) * m
             propina = buscar_float(["propina"]) * m
-            base_0, base_12_15, iva_12_15, no_obj_iva, exento_iva, otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            base_0, base_12_15, iva_12_15 = 0.0, 0.0, 0.0
+            no_obj_iva, exento_iva = 0.0, 0.0
+            otra_base, otro_monto_iva, ice_val = 0.0, 0.0, 0.0
             
             for imp in xml_data.findall(".//totalImpuesto"):
-                cod = imp.find("codigo").text; cod_por = imp.find("codigoPorcentaje").text
+                cod = imp.find("codigo").text
+                cod_por = imp.find("codigoPorcentaje").text
                 base = float(imp.find("baseImponible").text or 0) * m
                 valor = float(imp.find("valor").text or 0) * m
-                if cod == "2": 
+                
+                if cod == "2": # IVA
                     if cod_por == "0": base_0 += base
-                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: base_12_15 += base; iva_12_15 += valor
+                    elif cod_por in ["2", "3", "4", "5", "8", "10"]: # Tarifas normales
+                        base_12_15 += base; iva_12_15 += valor
                     elif cod_por == "6": no_obj_iva += base
                     elif cod_por == "7": exento_iva += base
-                    else: otra_base += base; otro_monto_iva += valor
+                    else: # CUALQUIER OTRA COSA (Inc. el 5% si viene con otro codigo, o antiguos)
+                        otra_base += base; otro_monto_iva += valor
                 elif cod == "3": ice_val += valor
+                else: # Otros impuestos raros a la bolsa de 'Otros'
+                     otra_base += base; otro_monto_iva += valor
 
-            ruc_cliente = buscar(["identificacionComprador", "identificacionSujetoRetenido"])
-            nombre_cliente = buscar(["razonSocialComprador", "razonSocialSujetoRetenido"]).upper()
-            
+            # Memoria
             if tipo_doc == "NC":
                 detalle_final, memo_final = "", ""
             else:
@@ -173,47 +235,56 @@ def extraer_datos_robusto(xml_file):
             subdetalle = " | ".join(items[:5]) if items else ""
 
             base_data.update({
-                "RUC CLIENTE": ruc_cliente, "CLIENTE": nombre_cliente,
                 "DETALLE": detalle_final, "MEMO": memo_final, "SUBDETALLE": subdetalle,
-                "OTRA BASE IVA": otra_base, "OTRO IVA": otro_monto_iva, "MONTO ICE": ice_val, "PROPINAS": propina,
-                "EXENTO DE IVA": exento_iva, "NO OBJ IVA": no_obj_iva, "BASE. 0": base_0, "BASE. 12 / 15": base_12_15,
-                "IVA.": iva_12_15, "TOTAL": total, "CONTRIBUYENTE": ruc_cliente
+                "OTRA BASE IVA": otra_base, "OTRO IVA": otro_monto_iva, 
+                "MONTO ICE": ice_val, "PROPINAS": propina,
+                "EXENTO DE IVA": exento_iva, "NO OBJ IVA": no_obj_iva, 
+                "BASE. 0": base_0, "BASE. 12 / 15": base_12_15,
+                "IVA.": iva_12_15, "TOTAL": total
             })
             return base_data
     except: return None
 
-# --- 5. LÓGICA DE INTEGRACIÓN ---
+# --- 5. LÓGICA DE INTEGRACIÓN (CRUCE VENTAS) ---
 def procesar_ventas_con_retenciones(lista_datos_crudos):
     ventas = []
     retenciones_map = {}
+    
     for dato in lista_datos_crudos:
-        if dato["TIPO"] == "FC": ventas.append(dato)
-        elif dato["TIPO"] == "RET" and dato.get("SUSTENTO"): retenciones_map[dato["SUSTENTO"]] = dato
+        if dato["TIPO"] == "FC": 
+            ventas.append(dato)
+        elif dato["TIPO"] == "RET" and dato.get("SUSTENTO"): 
+            # Normalizar clave de sustento por si acaso
+            retenciones_map[dato["SUSTENTO"]] = dato
 
     ventas_integradas = []
     for venta in ventas:
-        num_fact = venta["N. FACTURA"]
-        ret_asociada = retenciones_map.get(num_fact, {})
+        num_fact = venta["N. FACTURA"] # Formato esperado: 001-001-000000123
+        ret_asociada = retenciones_map.get(num_fact, {}) # BUSCAR POR NUMERO DE FACTURA EXACTO
+        
         fila = {
+            # AZUL (Venta)
             "MES": venta.get("MES"), "FECHA": venta.get("FECHA"), "N. FACTURA": num_fact,
             "RUC": venta.get("RUC CLIENTE"), "CLIENTE": venta.get("CLIENTE"),
             "DETALLE": "SERVICIOS", "MEMO": "PROFESIONAL", "MONTO REEMBOLS": 0.0,
             "BASE. 0": venta.get("BASE. 0", 0), "BASE. 12 / 15": venta.get("BASE. 12 / 15", 0),
             "IVA": venta.get("IVA.", 0), "TOTAL": venta.get("TOTAL", 0),
-            "FECHA RET": ret_asociada.get("FECHA", ""), "N° RET": ret_asociada.get("N. FACTURA", ""),
-            "N° AUTORIZACIÓN": ret_asociada.get("N AUTORIZACION", ""),
-            "RET RENTA": ret_asociada.get("RET RENTA", 0), "RET IVA": ret_asociada.get("RET IVA", 0),
-            "ISD": 0.0, "TOTAL RET": ret_asociada.get("TOTAL RET", 0)
+            
+            # VERDE (Retención Cruzada)
+            "FECHA RET": ret_asociada.get("fechaemi", ""), # Usar fechaemi del dict de retencion
+            "N° RET": ret_asociada.get("numreten", ""),
+            "N° AUTORIZACIÓN": ret_asociada.get("numautori", ""),
+            "RET RENTA": ret_asociada.get("rt_renta", 0), 
+            "RET IVA": ret_asociada.get("rt_iva", 0),
+            "ISD": 0.0, 
+            "TOTAL RET": ret_asociada.get("TOTAL RET", 0)
         }
         ventas_integradas.append(fila)
     return ventas_integradas
 
-# --- 6. GENERADOR MULTI-EXCEL MAESTRO (CORREGIDO) ---
+# --- 6. GENERADOR MULTI-EXCEL MAESTRO ---
 def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_lista=None, sri_mode=None):
     output = io.BytesIO()
-    
-    # IMPORTANTE: Todo el trabajo con 'writer' debe estar dentro del 'with'.
-    # NO usar 'return' dentro del bloque 'with', porque interrumpe el guardado.
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         wb = writer.book
         f_azul = wb.add_format({'bold':True,'align':'center','border':1,'bg_color':'#002060','font_color':'white'})
@@ -230,98 +301,105 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
                 header_fmt = f_amar; sheet_name = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
-                cols = ["RUC CLIENTE","CLIENTE","FECHA","NOMBRE","RUC","SUSTENTO","N. FACTURA","RET RENTA","RET IVA","TOTAL RET","N AUTORIZACION"]
+                # COLUMNAS EXACTAS DE LA IMAGEN VERDE
+                cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori", "fecautori"]
                 header_fmt = f_verd; sheet_name = "RETENCIONES"
             else: 
                 cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
                 header_fmt = f_azul; sheet_name = "FACTURAS"
 
+            # Rellenar faltantes y ordenar
             for c in cols: 
                 if c not in df.columns: df[c] = ""
             df = df[cols]
+            
             ws = wb.add_worksheet(sheet_name)
             for i, c in enumerate(cols): ws.write(0, i, c, header_fmt)
             for r, row in enumerate(df.values, 1):
                 for c, val in enumerate(row): ws.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-        
+            
+            # Ajuste de ancho
+            ws.set_column(0, len(cols)-1, 15)
+            
+            return output.getvalue()
+
         # === MODO MANUAL (INTEGRAL) ===
-        else:
-            meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+        meses = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
 
-            # HOJA COMPRAS
-            if data_compras:
-                df_c = pd.DataFrame(data_compras)
-                orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-                for c in orden_c: 
-                    if c not in df_c.columns: df_c[c] = ""
-                df_c = df_c[orden_c]
-                
-                ws_c = wb.add_worksheet('COMPRAS')
-                for i, c in enumerate(orden_c):
-                    fmt = f_amar if i in range(9, 19) else f_azul
-                    ws_c.write(0, i, c, fmt)
-                for r, row in enumerate(df_c.values, 1):
-                    for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-                
-                ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
-                for cidx in range(9, 19): 
-                    l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
+        # HOJA COMPRAS
+        if data_compras:
+            df_c = pd.DataFrame(data_compras)
+            orden_c = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
+            for c in orden_c: 
+                if c not in df_c.columns: df_c[c] = ""
+            df_c = df_c[orden_c]
+            
+            ws_c = wb.add_worksheet('COMPRAS')
+            for i, c in enumerate(orden_c):
+                # Amarillo para OTRA BASE hasta EXENTO (columnas especiales)
+                fmt = f_amar if i in range(9, 15) else f_azul
+                ws_c.write(0, i, c, fmt)
+            for r, row in enumerate(df_c.values, 1):
+                for c, val in enumerate(row): ws_c.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+            
+            ft = len(df_c) + 1; ws_c.write(ft, 0, "TOTAL", f_tot)
+            for cidx in range(9, 19): 
+                l = xlsxwriter.utility.xl_col_to_name(cidx); ws_c.write_formula(ft, cidx, f"=SUM({l}2:{l}{ft})", f_tot)
 
-                # REPORTE ANUAL
-                ws_ra = wb.add_worksheet('REPORTE ANUAL')
-                ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
-                cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
-                icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
-                for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
-                ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
-                
-                cols_gasto = ["P","Q","O"] 
-                for r, mes in enumerate(meses):
-                    fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
-                    f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","O"]])
-                    ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
-                    for cidx, cat in enumerate(cats):
-                        f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
-                        ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
-                    ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
-                ws_ra.write(15,0,"TOTAL",f_tot)
-                for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
+            # REPORTE ANUAL
+            ws_ra = wb.add_worksheet('REPORTE ANUAL')
+            ws_ra.set_column('A:K', 14); ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
+            cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
+            icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
+            for i,(ct,ic) in enumerate(zip(cats,icos)): ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
+            ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
+            
+            cols_gasto = ["P","Q","R"] 
+            for r, mes in enumerate(meses):
+                fila = r+4; ws_ra.write(r+3,0,mes.title(),f_num)
+                f_pr = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$I:$I,\"PROFESIONAL\")" for l in ["P","Q","R"]])
+                ws_ra.write_formula(r+3,1,"="+f_pr,f_num)
+                for cidx, cat in enumerate(cats):
+                    f_pe = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{cat}\")" for l in cols_gasto])
+                    ws_ra.write_formula(r+3,cidx+2,"="+f_pe,f_num)
+                ws_ra.write_formula(r+3,10,f"=SUM(B{fila}:J{fila})",f_num)
+            ws_ra.write(15,0,"TOTAL",f_tot)
+            for c in range(1,11): l=xlsxwriter.utility.xl_col_to_name(c); ws_ra.write_formula(15,c,f"=SUM({l}4:{l}15)",f_tot)
 
-            # HOJA VENTAS
-            if data_ventas_ret:
-                df_v = pd.DataFrame(data_ventas_ret)
-                orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
-                for c in orden_v: 
-                    if c not in df_v.columns: df_v[c] = ""
-                df_v = df_v[orden_v]
-                
-                ws_v = wb.add_worksheet('VENTAS')
-                for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
-                for r, row in enumerate(df_v.values, 1):
-                    for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
-                
-                ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
-                for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
+        # HOJA VENTAS (CRUZADA)
+        if data_ventas_ret:
+            df_v = pd.DataFrame(data_ventas_ret)
+            orden_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
+            for c in orden_v: 
+                if c not in df_v.columns: df_v[c] = ""
+            df_v = df_v[orden_v]
+            
+            ws_v = wb.add_worksheet('VENTAS')
+            for i, c in enumerate(orden_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
+            for r, row in enumerate(df_v.values, 1):
+                for c, val in enumerate(row): ws_v.write(r, c, val, f_num if isinstance(val, (int,float)) else wb.add_format({'border':1}))
+            
+            ft_v = len(df_v) + 1; ws_v.write(ft_v, 0, "TOTAL", f_tot)
+            for cidx in range(7, 19): l = xlsxwriter.utility.xl_col_to_name(cidx); ws_v.write_formula(ft_v, cidx, f"=SUM({l}2:{l}{ft_v})", f_tot)
 
-                # PROYECCION
-                ws_p = wb.add_worksheet('PROYECCION')
-                ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
-                ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
-                for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
-                
-                for c, mes in enumerate(meses):
-                    col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
-                    ws_p.write(1, col, mes, f_azul)
-                    ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
-                    if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
-                    else: ws_p.write(3, col, 0, f_num)
-                    ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
-                
-                lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
-                ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
-                for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
+            # PROYECCION
+            ws_p = wb.add_worksheet('PROYECCION')
+            ws_p.set_column('A:A', 12); ws_p.set_column('B:M', 15)
+            ws_p.merge_range('A1:D1', f"PERIODO: {datetime.now().year}", f_azul)
+            for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
+            
+            for c, mes in enumerate(meses):
+                col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
+                ws_p.write(1, col, mes, f_azul)
+                ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
+                if data_compras: ws_p.write_formula(3, col, f"=SUMIFS('COMPRAS'!$P:$P,'COMPRAS'!$A:$A,\"{mes}\") + SUMIFS('COMPRAS'!$Q:$Q,'COMPRAS'!$A:$A,\"{mes}\")", f_num)
+                else: ws_p.write(3, col, 0, f_num)
+                ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
+            
+            lt = xlsxwriter.utility.xl_col_to_name(len(meses)+1)
+            ws_p.write(1, len(meses)+1, "TOTAL", f_azul)
+            for r in range(2,5): ws_p.write_formula(r, len(meses)+1, f"=SUM(B{r+1}:{xlsxwriter.utility.xl_col_to_name(len(meses))}{r+1})", f_tot)
 
-    # Ahora que salimos del bloque 'with', el archivo se guardó y cerró correctamente.
     return output.getvalue()
 
 # --- 7. INTERFAZ ---
@@ -353,34 +431,41 @@ with st.sidebar:
                 time.sleep(1) 
             if exito: st.success("¡Gracias! Tu opinión ha sido registrada.")
             else: st.error("No se pudo enviar. Revisa tu conexión.")
-        else:
-            st.warning("Escribe algo antes de enviar.")
+        else: st.warning("Escribe algo antes de enviar.")
 
     st.markdown("---")
     if st.button("Cerrar Sesión"):
         registrar_actividad(st.session_state.usuario_actual, "SALIÓ"); st.session_state.autenticado = False; st.rerun()
 
-tab_xml, tab_sri = st.tabs(["📂 Subir XMLs (Manual)", "📡 Descarga SRI (TXT)"])
+tab_xml, tab_sri = st.tabs(["📂 Subir XMLs (Manual/ZIP)", "📡 Descarga SRI (TXT)"])
 
 with tab_xml:
     st1, st2, st3 = st.tabs(["🛒 Compras y NC", "💰 Ventas y Retenciones", "📑 Informe Integral"])
     with st1:
-        up_c = st.file_uploader("Subir Compras/NC XML", type=["xml"], accept_multiple_files=True, key=f"c_{st.session_state.id_proceso}")
+        # AHORA ACEPTA ZIP Y XML
+        up_c = st.file_uploader("Subir Compras/NC (XML o ZIP)", type=["xml", "zip"], accept_multiple_files=True, key=f"c_{st.session_state.id_proceso}")
         if up_c and st.button("Procesar Compras"):
-            data = [extraer_datos_robusto(x) for x in up_c]; data = [d for d in data if d and d["TIPO"] in ["FC","NC"]]
+            # PROCESAR ARCHIVOS (XMLs sueltos y ZIPs)
+            xmls_reales = procesar_archivos_entrada(up_c)
+            data = [extraer_datos_robusto(x) for x in xmls_reales]; data = [d for d in data if d and d["TIPO"] in ["FC","NC"]]
             if data:
                 st.session_state.data_compras_cache = data
                 registrar_actividad(st.session_state.usuario_actual, "GENERÓ REPORTE COMPRAS", len(data))
                 st.download_button("📥 Reporte Compras", generar_excel_multiexcel(data_compras=data), f"C_{datetime.now().strftime('%H%M')}.xlsx")
+            else: st.warning("No se encontraron XMLs válidos en los archivos subidos.")
+            
     with st2:
-        up_v = st.file_uploader("Subir Ventas/Ret XML", type=["xml"], accept_multiple_files=True, key=f"v_{st.session_state.id_proceso}")
+        up_v = st.file_uploader("Subir Ventas/Ret (XML o ZIP)", type=["xml", "zip"], accept_multiple_files=True, key=f"v_{st.session_state.id_proceso}")
         if up_v and st.button("Procesar Ventas"):
-            data = [extraer_datos_robusto(x) for x in up_v]; data = [d for d in data if d]
+            xmls_reales = procesar_archivos_entrada(up_v)
+            data = [extraer_datos_robusto(x) for x in xmls_reales]; data = [d for d in data if d]
             if data:
                 res = procesar_ventas_con_retenciones(data)
                 st.session_state.data_ventas_cache = res
                 registrar_actividad(st.session_state.usuario_actual, "GENERÓ REPORTE VENTAS", len(res))
                 st.download_button("📥 Reporte Ventas", generar_excel_multiexcel(data_ventas_ret=res), f"V_{datetime.now().strftime('%H%M')}.xlsx")
+            else: st.warning("No se encontraron XMLs válidos.")
+            
     with st3:
         if st.button("Generar Informe Integral"):
             if st.session_state.data_compras_cache and st.session_state.data_ventas_cache:
