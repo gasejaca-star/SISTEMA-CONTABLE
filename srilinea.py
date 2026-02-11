@@ -508,56 +508,92 @@ with tab_xml:
             else: st.warning("Procese Compras y Ventas primero.")
 
 with tab_sri:
-    def bloque_sri(titulo, tipo_filtro, key):
-        st.subheader(titulo)
-        up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=key)
-        if up and st.button(f"Descargar {titulo}", key=f"b_{key}"):
-            # FIX: Decodificación segura y Regex 48,49
-            content = up.read().decode("latin-1", errors="ignore")
-            claves = list(dict.fromkeys(re.findall(r'\d{48,49}', content)))
+  # --- REEMPLAZA TU FUNCIÓN bloque_sri CON ESTA VERSIÓN BLINDADA ---
+
+def bloque_sri(titulo, tipo_filtro, key):
+    st.subheader(titulo)
+    up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=key)
+    
+    if up and st.button(f"Descargar {titulo}", key=f"b_{key}"):
+        # 1. Leer contenido y buscar claves (48 o 49 dígitos)
+        content = up.read().decode("latin-1", errors="ignore")
+        claves = list(dict.fromkeys(re.findall(r'\d{48,49}', content)))
+        
+        if claves:
+            registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
+            bar = st.progress(0)
+            status = st.empty()
+            lst = []
+            errores = 0 
+            zip_buffer = io.BytesIO()
             
-            if claves:
-                registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
-                bar = st.progress(0); status = st.empty(); lst = []
-                errores = 0 # Contador de errores
-                zip_buffer = io.BytesIO()
-                
-                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
-                    for i, cl in enumerate(claves):
+            # 2. Crear sesión persistente (Mantiene la conexión 'viva' y reduce bloqueos)
+            session = requests.Session()
+            session.verify = False
+            session.headers.update(HEADERS_WS)
+
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
+                for i, cl in enumerate(claves):
+                    intentos = 0
+                    max_intentos = 3 # Intentará 3 veces por cada factura antes de rendirse
+                    exito = False
+                    
+                    while intentos < max_intentos and not exito:
                         try:
-                            # FIX: Pausa de seguridad para evitar bloqueo del SRI
-                            time.sleep(0.5) 
-                            # FIX: Timeout aumentado a 10s
-                            r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=10)
+                            # 3. Pausa Dinámica: 
+                            # Si es el primer intento, espera poco (0.3s). 
+                            # Si ya falló una vez, espera más (2.5s) para que el SRI se "calme".
+                            wait_time = 0.3 if intentos == 0 else 2.5
+                            time.sleep(wait_time)
                             
-                            if r.status_code==200 and "<autorizaciones>" in r.text: 
+                            body = f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>'
+                            
+                            # Timeout de 12 segundos para dar tiempo al servidor
+                            r = session.post(URL_WS, data=body, timeout=12)
+                            
+                            if r.status_code == 200 and "<autorizaciones>" in r.text:
                                 zf.writestr(f"{cl}.xml", r.text)
                                 d = extraer_datos_robusto(io.BytesIO(r.content))
                                 if d:
+                                    # Filtrado estricto
                                     if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
                                     elif tipo_filtro == "NC" and d["TIPO"] == "NC": lst.append(d)
                                     elif tipo_filtro == "FC" and d["TIPO"] in ["FC","LC"]: lst.append(d)
+                                exito = True # ¡Éxito! Salimos del bucle de reintentos
                             else:
-                                errores += 1
-                        except: 
-                            errores += 1
-                            pass
+                                # El servidor respondió, pero con error (ej. 500 o bloqueo)
+                                intentos += 1 
                         
-                        bar.progress((i+1)/len(claves))
-                        status.text(f"Procesando {i+1}/{len(claves)} | Fallos/Saltados: {errores}")
-                
-                if lst: 
-                    st.success(f"✅ Completado. {len(lst)} documentos procesados. ({errores} fallidos)")
-                    registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL SRI {titulo}", len(lst))
-                    c1, c2 = st.columns(2)
-                    with c1: st.download_button(f"📦 ZIP XMLs {titulo}", zip_buffer.getvalue(), f"{titulo}.zip")
-                    with c2: st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
+                        except Exception as e:
+                            # Error de conexión (internet o bloqueo total)
+                            intentos += 1
+                            print(f"Reintento {intentos} para clave {cl}: {e}")
+                    
+                    if not exito:
+                        errores += 1
+
+                    # Actualizar barra visualmente
+                    progreso = (i + 1) / len(claves)
+                    bar.progress(progreso)
+                    status.text(f"Procesando {i+1}/{len(claves)} | ✅ OK: {len(lst)} | ❌ Fallos: {errores}")
+            
+            if lst: 
+                if errores == 0:
+                    st.success(f"✅ ¡Perfecto! {len(lst)} documentos descargados sin errores.")
                 else:
-                    st.warning("No se encontraron documentos válidos o hubo errores de conexión.")
+                    st.warning(f"⚠️ Se descargaron {len(lst)} documentos, pero {errores} fallaron definitivamente tras 3 intentos.")
+                
+                registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL SRI {titulo}", len(lst))
+                c1, c2 = st.columns(2)
+                with c1: st.download_button(f"📦 ZIP XMLs {titulo}", zip_buffer.getvalue(), f"{titulo}.zip")
+                with c2: st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
             else:
-                 st.warning("No se encontraron claves válidas (48 o 49 dígitos) en el archivo.")
+                st.error("Error crítico: No se pudo descargar nada. Verifica tu internet o si el SRI está caído.")
+        else:
+             st.warning("No se encontraron claves de 48 o 49 dígitos en el archivo.")
 
     s1, s2, s3 = st.tabs(["Facturas", "Notas Crédito", "Retenciones"])
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
+
