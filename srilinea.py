@@ -507,7 +507,7 @@ with tab_xml:
                 st.download_button("📥 INFORME INTEGRAL", generar_excel_multiexcel(st.session_state.data_compras_cache, st.session_state.data_ventas_cache), f"INT_{datetime.now().strftime('%H%M')}.xlsx")
             else: st.warning("Procese Compras y Ventas primero.")
 
-with tab_sri:
+
 def bloque_sri(titulo, tipo_filtro, key):
 
         st.subheader(titulo)
@@ -577,6 +577,7 @@ def bloque_sri(titulo, tipo_filtro, key):
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
+
 
 
 
