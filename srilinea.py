@@ -507,79 +507,57 @@ with tab_xml:
                 st.download_button("📥 INFORME INTEGRAL", generar_excel_multiexcel(st.session_state.data_compras_cache, st.session_state.data_ventas_cache), f"INT_{datetime.now().strftime('%H%M')}.xlsx")
             else: st.warning("Procese Compras y Ventas primero.")
 
-
-def bloque_sri(titulo, tipo_filtro, key):
-
+with tab_sri:
+    def bloque_sri(titulo, tipo_filtro, key):
         st.subheader(titulo)
-
         up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=key)
-
         if up and st.button(f"Descargar {titulo}", key=f"b_{key}"):
-
-            claves = list(dict.fromkeys(re.findall(r'\d{49}', up.read().decode("latin-1"))))
-
+            # FIX: Decodificación segura y Regex 48,49
+            content = up.read().decode("latin-1", errors="ignore")
+            claves = list(dict.fromkeys(re.findall(r'\d{48,49}', content)))
+            
             if claves:
-
                 registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
-
                 bar = st.progress(0); status = st.empty(); lst = []
-
+                errores = 0 # Contador de errores
                 zip_buffer = io.BytesIO()
-
                 
-
                 with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
-
                     for i, cl in enumerate(claves):
-
                         try:
-
-                            r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=5)
-
+                            # FIX: Pausa de seguridad para evitar bloqueo del SRI
+                            time.sleep(0.5) 
+                            # FIX: Timeout aumentado a 10s
+                            r = requests.post(URL_WS, data=f'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion"><soapenv:Body><ec:autorizacionComprobante><claveAccesoComprobante>{cl}</claveAccesoComprobante></ec:autorizacionComprobante></soapenv:Body></soapenv:Envelope>', headers=HEADERS_WS, verify=False, timeout=10)
+                            
                             if r.status_code==200 and "<autorizaciones>" in r.text: 
-
                                 zf.writestr(f"{cl}.xml", r.text)
-
                                 d = extraer_datos_robusto(io.BytesIO(r.content))
-
                                 if d:
-
                                     if tipo_filtro == "RET" and d["TIPO"] == "RET": lst.append(d)
-
                                     elif tipo_filtro == "NC" and d["TIPO"] == "NC": lst.append(d)
-
                                     elif tipo_filtro == "FC" and d["TIPO"] in ["FC","LC"]: lst.append(d)
-
-                        except: pass
-
+                            else:
+                                errores += 1
+                        except: 
+                            errores += 1
+                            pass
+                        
                         bar.progress((i+1)/len(claves))
-
-                        status.text(f"Procesando {i+1}/{len(claves)}")
-
+                        status.text(f"Procesando {i+1}/{len(claves)} | Fallos/Saltados: {errores}")
                 
-
                 if lst: 
-
-                    st.success(f"✅ Completado. {len(lst)} documentos procesados.")
-
+                    st.success(f"✅ Completado. {len(lst)} documentos procesados. ({errores} fallidos)")
                     registrar_actividad(st.session_state.usuario_actual, f"GENERÓ EXCEL SRI {titulo}", len(lst))
-
                     c1, c2 = st.columns(2)
-
                     with c1: st.download_button(f"📦 ZIP XMLs {titulo}", zip_buffer.getvalue(), f"{titulo}.zip")
-
                     with c2: st.download_button(f"📊 Excel {titulo}", generar_excel_multiexcel(data_sri_lista=lst, sri_mode=tipo_filtro), f"{titulo}.xlsx")
-
                 else:
+                    st.warning("No se encontraron documentos válidos o hubo errores de conexión.")
+            else:
+                 st.warning("No se encontraron claves válidas (48 o 49 dígitos) en el archivo.")
 
-                    st.warning("No se encontraron documentos válidos para este módulo.")
     s1, s2, s3 = st.tabs(["Facturas", "Notas Crédito", "Retenciones"])
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
-
-
-
-
-
-
