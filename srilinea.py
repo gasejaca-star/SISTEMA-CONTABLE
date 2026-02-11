@@ -512,7 +512,7 @@ with tab_sri:
         st.subheader(titulo)
         up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=key)
         if up and st.button(f"Descargar {titulo}", key=f"b_{key}"):
-            claves = list(dict.fromkeys(re.findall(r'\d{47}', up.read().decode("latin-1"))))
+            claves = list(dict.fromkeys(re.findall(r'\d{48}', up.read().decode("latin-1"))))
             if claves:
                 registrar_actividad(st.session_state.usuario_actual, f"INICIÓ DESCARGA SRI {titulo}", len(claves))
                 bar = st.progress(0); status = st.empty(); lst = []
@@ -546,3 +546,4 @@ with tab_sri:
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
+
