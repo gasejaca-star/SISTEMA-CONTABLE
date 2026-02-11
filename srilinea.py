@@ -510,6 +510,8 @@ with tab_xml:
 with tab_sri:
   # --- REEMPLAZA TU FUNCIÓN bloque_sri CON ESTA VERSIÓN BLINDADA ---
 
+# --- COPIAR Y REEMPLAZAR DESDE AQUÍ HASTA EL FINAL ---
+
 def bloque_sri(titulo, tipo_filtro, key):
     st.subheader(titulo)
     up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=key)
@@ -592,8 +594,8 @@ def bloque_sri(titulo, tipo_filtro, key):
         else:
              st.warning("No se encontraron claves de 48 o 49 dígitos en el archivo.")
 
+    # ESTO DEBE ESTAR ALINEADO CON EL INICIO DE LA FUNCIÓN (SIN TABULACIÓN EXTRA)
     s1, s2, s3 = st.tabs(["Facturas", "Notas Crédito", "Retenciones"])
     with s1: bloque_sri("Facturas Recibidas", "FC", "sri_fc")
     with s2: bloque_sri("Notas de Crédito", "NC", "sri_nc")
     with s3: bloque_sri("Retenciones", "RET", "sri_ret")
-
