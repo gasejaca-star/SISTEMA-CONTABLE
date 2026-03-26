@@ -39,21 +39,25 @@ def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
 
 # --- 2. GESTIÓN DE ESTADO Y LOGIN ---
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
-if "id_proceso" not in st.session_state: st.session_state.id_proceso = 0
+if "es_premium" not in st.session_state: st.session_state.es_premium = False
+if "invitaciones_disponibles" not in st.session_state: st.session_state.invitaciones_disponibles = 0
 if "data_compras_cache" not in st.session_state: st.session_state.data_compras_cache = []
 if "data_ventas_cache" not in st.session_state: st.session_state.data_ventas_cache = []
-if "invitaciones_disponibles" not in st.session_state: st.session_state.invitaciones_disponibles = 0
 if "sri_results" not in st.session_state: st.session_state.sri_results = {}
+if "id_proceso" not in st.session_state: st.session_state.id_proceso = 0
 
 if not st.session_state.autenticado:
     st.sidebar.title("🔐 Acceso RAPIDITO")
-    u, p = st.sidebar.text_input("Usuario"), st.sidebar.text_input("Clave", type="password")
-    if st.sidebar.button("Entrar"):
+    u = st.sidebar.text_input("Usuario")
+    p = st.sidebar.text_input("Clave", type="password")
+    if st.sidebar.button("Entrar", use_container_width=True):
         resp = conectar_api({"accion": "LOGIN", "usuario": u.strip(), "clave": p.strip()})
         if resp.get("exito"):
-            st.session_state.autenticado, st.session_state.usuario_actual = True, u.strip()
+            st.session_state.autenticado = True
+            st.session_state.usuario_actual = u.strip()
             st.session_state.invitaciones_disponibles = resp.get("invitaciones", 0)
-            registrar_actividad(u, "LOGIN"); st.rerun()
+            st.session_state.es_premium = resp.get("premium", False)
+            st.rerun()
         else: st.sidebar.error("Credenciales incorrectas")
     st.stop()
 
