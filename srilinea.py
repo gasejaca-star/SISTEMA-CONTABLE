@@ -83,9 +83,6 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
                             </button>
                         </a>
                     ''', unsafe_allow_html=True)
-                    if st.button("YA LO ENVIÉ, ENTRAR AL SISTEMA"):
-                        st.session_state.invitaciones_disponibles -= 1
-                        st.rerun()
             else: st.error("Ingresa un correo.")
 
     with col_w2:
