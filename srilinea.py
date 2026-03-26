@@ -94,10 +94,9 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
             st.markdown(f"""
             ### 💰 Costo: $25.00 / Año
             **Transferencia Bancaria (Ecuador):**
-            * **Banco:** Banco Pichincha (Ahorros)
+            * **Banco:** Banco Pichincha (Ahorros) 2205082283
             * **Beneficiario:** Gabriel Sebastián Jácome Carvajal
-            * **Cédula:** 1726053421
-            * **Correo:** pagos@rapidito.ai
+            * **Enviar el comprobante al siguiente whatsapp para activación** 0982258418
             """)
             st.link_button("📩 ENVIAR COMPROBANTE POR WHATSAPP", f"https://wa.me/593987654321?text=Hola%20Gabriel,%20pago%20realizado%20usuario%20{st.session_state.usuario_actual}")
     st.stop()
