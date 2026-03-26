@@ -95,10 +95,9 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
             ### 💰 Costo: $25.00 / Año
             **Transferencia Bancaria (Ecuador):**
             * **Banco:** Banco Pichincha (Ahorros) 2205082283
-            * **Beneficiario:** Gabriel Sebastián Jácome Carvajal
-            * **Enviar el comprobante al siguiente whatsapp para activación** 0982258418
+            * **Beneficiario:** Gabriel  Jácome 
+            * **Enviar el comprobante al siguiente whatsapp para la activación** 0982258418
             """)
-            st.link_button("📩 ENVIAR COMPROBANTE POR WHATSAPP", f"https://wa.me/593987654321?text=Hola%20Gabriel,%20pago%20realizado%20usuario%20{st.session_state.usuario_actual}")
     st.stop()
 
 # --- 4. MOTOR DE EXTRACCIÓN ROBUSTO ---
