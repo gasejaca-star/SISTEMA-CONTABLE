@@ -92,7 +92,7 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
         st.subheader("👑 Versión Premium")
         with st.expander("💎 VER VALOR Y DATOS DE PAGO", expanded=True):
             st.markdown(f"""
-            ### 💰 Costo: $25.00 / Año
+            ### 💰 Costo: $20 / Año
             **Transferencia Bancaria (Ecuador):**
             * **Banco:** Banco Pichincha (Ahorros) 2205082283
             * **Beneficiario:** Gabriel  Jácome 
