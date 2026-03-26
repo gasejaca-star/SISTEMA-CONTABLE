@@ -43,72 +43,20 @@ if "data_compras_cache" not in st.session_state: st.session_state.data_compras_c
 if "data_ventas_cache" not in st.session_state: st.session_state.data_ventas_cache = []
 if "invitaciones_disponibles" not in st.session_state: st.session_state.invitaciones_disponibles = 0
 if "sri_results" not in st.session_state: st.session_state.sri_results = {}
-if "mostrar_advertencia" not in st.session_state: st.session_state.mostrar_advertencia = False
 
-# --- LOGIN ---
 if not st.session_state.autenticado:
     st.sidebar.title("🔐 Acceso RAPIDITO")
     u, p = st.sidebar.text_input("Usuario"), st.sidebar.text_input("Clave", type="password")
-    if st.sidebar.button("Entrar", use_container_width=True):
+    if st.sidebar.button("Entrar"):
         resp = conectar_api({"accion": "LOGIN", "usuario": u.strip(), "clave": p.strip()})
         if resp.get("exito"):
-            st.session_state.autenticado = True
-            st.session_state.usuario_actual = u.strip()
+            st.session_state.autenticado, st.session_state.usuario_actual = True, u.strip()
             st.session_state.invitaciones_disponibles = resp.get("invitaciones", 0)
-            
-            # Lógica de Advertencia
-            adv = str(resp.get("advertencia", "NO")).strip().upper()
-            if adv == "SI" and st.session_state.invitaciones_disponibles > 0:
-                st.session_state.mostrar_advertencia = True
-            
             registrar_actividad(u, "LOGIN"); st.rerun()
         else: st.sidebar.error("Credenciales incorrectas")
     st.stop()
 
-# --- 2.5 PANTALLA DE ADVERTENCIA (BLOQUEO INTERSTICIAL) ---
-if st.session_state.mostrar_advertencia:
-    st.title("⚠️ Aviso Importante")
-    st.warning("""
-    **PARA MANTENER LA VERSION GRATUITA DEBES ACABAR TUS INVITACIONES DISPONIBLES QUE SE ACREDITAN CADA MES, 
-    INVITA A MÁS USUARIOS QUE USEN LA APLICACIÓN, TE QUEDA UNA SEMANA PARA HACERLO, 
-    CASO CONTRARIO CAMBIA TU CUENTA A VERSION PREMIUM PARA SALTAR ESTE PASO.**
-    """)
-    
-    if st.session_state.invitaciones_disponibles <= 0:
-        st.success("✅ Has completado tus invitaciones. ¡Ya puedes acceder!")
-        if st.button("INGRESAR AHORA 🚀", type="primary", use_container_width=True):
-            st.session_state.mostrar_advertencia = False
-            st.rerun()
-    else:
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("👑 TRANSFORMAR A PREMIUM", use_container_width=True):
-                st.session_state.modo_adv = "PREMIUM"
-        with c2:
-            if st.button("🎁 MANTENER VERSION GRATUITA", use_container_width=True):
-                st.session_state.modo_adv = "GRATUITA"
-
-        if st.session_state.get("modo_adv") == "PREMIUM":
-            st.info("""
-            **MEMBRESIA ANUAL $20** **DATOS DE PAGO:** Banco Pichincha. CTA 2205082283  
-            Envia el comprobante al: **0982258418** para activarte.
-            """)
-        
-        elif st.session_state.get("modo_adv") == "GRATUITA":
-            st.write(f"### Invitaciones pendientes: {st.session_state.invitaciones_disponibles}")
-            mail_inv = st.text_input("Correo del colega:")
-            if st.button("Enviar Invitación Ahora"):
-                if mail_inv:
-                    r_inv = conectar_api({"accion": "INVITAR", "usuario": st.session_state.usuario_actual, "invitado": mail_inv})
-                    if r_inv.get("exito"):
-                        st.session_state.invitaciones_disponibles = r_inv.get("invitaciones")
-                        msg = urllib.parse.quote(f"🎁 Regalo Pase *RAPIDITO AI*.\n👤 Usuario: {mail_inv}\n🔑 Clave: Rapidito2026\n👉 https://pruebas1998.streamlit.app")
-                        st.markdown(f'<a href="https://wa.me/?text={msg}" target="_blank"><button style="background-color:#25D366;color:white;width:100%;font-weight:bold;padding:10px;border-radius:8px;border:none;">📲 Compartir en WhatsApp</button></a>', unsafe_allow_html=True)
-                        st.rerun()
-                else: st.error("Ingresa un correo")
-    st.stop()
-
-# --- 3. MEMORIA Y FUNCIONES DE EXTRACCIÓN (Resto del Código) ---
+# --- 3. MEMORIA JSON ---
 if 'memoria' not in st.session_state:
     if os.path.exists("conocimiento_contable.json"):
         with open("conocimiento_contable.json", "r", encoding="utf-8") as f: st.session_state.memoria = json.load(f)
@@ -127,6 +75,7 @@ def procesar_archivos_entrada(lista):
                     if n.lower().endswith('.xml') and not n.startswith('__MACOSX'): xmls.append(io.BytesIO(z.read(n)))
     return xmls
 
+# --- 4. MOTOR DE EXTRACCIÓN ---
 def extraer_datos_robusto(xml_file):
     try:
         xml_file.seek(0); tree = ET.parse(xml_file); root = tree.getroot(); xml_data = None
@@ -153,7 +102,8 @@ def extraer_datos_robusto(xml_file):
         info_json = st.session_state.memoria["empresas"].get(razon_social)
         
         if len_id == 10:
-            memo_final, detalle_final = "PERSONAL", info_json["DETALLE"] if info_json else "NO DEDUCIBLE"
+            memo_final = "PERSONAL"
+            detalle_final = info_json["DETALLE"] if info_json else "NO DEDUCIBLE"
         else:
             detalle_final = info_json["DETALLE"] if info_json else "OTROS"
             memo_final = info_json["MEMO"] if info_json else "PROFESIONAL"
@@ -204,13 +154,13 @@ def extraer_datos_robusto(xml_file):
             
             p_node = xml_data.find(".//propina")
             prop = float(p_node.text or 0) * m if p_node is not None else 0.0
+
             items = [d.find("descripcion").text for d in xml_data.findall(".//detalle") if d.find("descripcion") is not None]
             data.update({"OTRA BASE IVA": otra_b, "OTRO IVA": otro_i, "MONTO ICE": ice, "PROPINAS": prop, "EXENTO DE IVA": exento, "NO OBJ IVA": no_obj, "BASE. 0": b0, "BASE. 12 / 15": b12, "IVA.": i12, "TOTAL": total_val, "SUBDETALLE": " | ".join(items[:5])})
         return data
     except: return None
 
-# --- [FUNCIONES DE EXCEL Y PROCESAMIENTO IGUALES AL CÓDIGO ORIGINAL] ---
-# (Se mantienen generar_excel_multiexcel, procesar_ventas_con_retenciones, etc.)
+# --- 5. LÓGICA DE INTEGRACIÓN VENTAS ---
 def procesar_ventas_con_retenciones(lista):
     vts, rets = [], {}
     for d in lista:
@@ -228,6 +178,7 @@ def procesar_ventas_con_retenciones(lista):
         })
     return res
 
+# --- 6. GENERADOR EXCEL INTEGRAL ---
 def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_lista=None, sri_mode=None):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -246,17 +197,18 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
             df = pd.DataFrame(data_sri_lista)
             if sri_mode == "NC":
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
-                fmt_h, sh_nm = f_amar, "NOTAS DE CREDITO"
+                fmt_h = f_amar; sh_nm = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
                 cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori"]
-                fmt_h, sh_nm = f_verd, "RETENCIONES"
+                fmt_h = f_verd; sh_nm = "RETENCIONES"
             else:
                 cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-                fmt_h, sh_nm = f_azul, "FACTURAS"
+                fmt_h = f_azul; sh_nm = "FACTURAS"
             
             for c in cols: 
                 if c not in df.columns: df[c] = ""
             ws = wb.add_worksheet(sh_nm)
+            ws.set_footer(texto_pie)
             for i, c in enumerate(cols): ws.write(0, i, c, fmt_h)
             for r, row in enumerate(df[cols].values, 1):
                 for c, v in enumerate(row): ws.write(r, c, v, f_num if isinstance(v, (float,int)) else wb.add_format({'border':1}))
@@ -268,6 +220,7 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 for c in orden_c: 
                     if c not in df_c.columns: df_c[c] = ""
                 ws_c = wb.add_worksheet('COMPRAS')
+                ws_c.set_footer(texto_pie)
                 for i, c in enumerate(orden_c): ws_c.write(0, i, c, f_amar if i in range(9, 15) else f_azul)
                 for r, row in enumerate(df_c[orden_c].values, 1):
                     for c, v in enumerate(row): ws_c.write(r, c, v, f_num if isinstance(v, (float,int)) else wb.add_format({'border':1}))
@@ -278,9 +231,15 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                     ws_c.write_formula(ft, ci, f"=SUM({l}2:{l}{ft})", f_tot)
 
                 ws_ra = wb.add_worksheet('REPORTE ANUAL')
+                ws_ra.set_footer(texto_pie)
+                ws_ra.set_column('A:K', 14)
+                ws_ra.merge_range('B1:B2', "Negocios y\nServicios", f_azul)
                 cats=["VIVIENDA","SALUD","EDUCACION","ALIMENTACION","VESTIMENTA","TURISMO","NO DEDUCIBLE","SERVICIOS BASICOS"]
-                for i,ct in enumerate(cats):
-                    ws_ra.write(1,i+2,ct.title(),f_azul)
+                icos=["🏠","❤️","🎓","🛒","🧢","✈️","🚫","💡"]
+                for i,(ct,ic) in enumerate(zip(cats,icos)):
+                    ws_ra.write(0,i+2,ic,f_azul); ws_ra.write(1,i+2,ct.title(),f_azul)
+                ws_ra.merge_range('K1:K2',"Total Mes",f_azul); ws_ra.write('B3',"PROFESIONALES",f_gris); ws_ra.merge_range('C3:J3',"GASTOS PERSONALES",f_gris)
+                
                 cl_sum = ["P","Q","O","N","J","M"]
                 for r, mes in enumerate(meses):
                     f_idx = r+4
@@ -291,20 +250,85 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                         f_ct = "+".join([f"SUMIFS('COMPRAS'!${l}:${l},'COMPRAS'!$A:$A,\"{mes}\",'COMPRAS'!$H:$H,\"{ct}\")" for l in cl_sum])
                         ws_ra.write_formula(r+3, cidx+2, "="+f_ct, f_num)
                     ws_ra.write_formula(r+3, 10, f"=SUM(B{f_idx}:J{f_idx})", f_num)
+                ws_ra.write(15, 0, "TOTAL", f_tot)
+                for c in range(1,11):
+                    l = xlsxwriter.utility.xl_col_to_name(c)
+                    ws_ra.write_formula(15, c, f"=SUM({l}4:{l}15)", f_tot)
 
             if data_ventas_ret:
                 df_v = pd.DataFrame(data_ventas_ret)
                 ord_v = ["MES","FECHA","N. FACTURA","RUC","CLIENTE","DETALLE","MEMO","MONTO REEMBOLS","BASE. 0","BASE. 12 / 15","IVA","TOTAL","FECHA RET","N° RET","N° AUTORIZACIÓN","RET RENTA","RET IVA","ISD","TOTAL RET"]
+                for c in ord_v: 
+                    if c not in df_v.columns: df_v[c] = ""
                 ws_v = wb.add_worksheet('VENTAS')
                 for i, c in enumerate(ord_v): ws_v.write(0, i, c, f_verd if i >= 12 else f_azul)
                 for r, row in enumerate(df_v[ord_v].values, 1):
                     for c, v in enumerate(row): ws_v.write(r, c, v, f_num if isinstance(v, (float,int)) else wb.add_format({'border':1}))
+                
+                ws_p = wb.add_worksheet('PROYECCION')
+                ws_p.set_column('A:M', 15)
+                for i, h in enumerate(["VENTAS", "COMPRAS", "TOTAL"]): ws_p.write(i+2, 0, h, f_azul)
+                for c, mes in enumerate(meses):
+                    col = c + 1; l = xlsxwriter.utility.xl_col_to_name(col)
+                    ws_p.write(1, col, mes, f_azul)
+                    ws_p.write_formula(2, col, f"=SUMIFS(VENTAS!$I:$I,VENTAS!$A:$A,\"{mes}\") + SUMIFS(VENTAS!$J:$J,VENTAS!$A:$A,\"{mes}\")", f_num)
+                    if data_compras:
+                        f_cp = "+".join([f"SUMIFS('COMPRAS'!${x}:${x},'COMPRAS'!$A:$A,{l}$2,'COMPRAS'!$I:$I,\"PROFESIONAL\")" for x in cl_sum])
+                        ws_p.write_formula(3, col, "="+f_cp, f_num)
+                    ws_p.write_formula(4, col, f"={l}3-{l}4", f_tot)
 
     return output.getvalue()
 
-# --- 7. INTERFAZ PRINCIPAL ---
+# --- 7. INTERFAZ ORGANIZADA ---
 st.title(f"🚀 RAPIDITO AI - {st.session_state.get('usuario_actual', 'Portal Contable')}")
 
+# --- SECCIÓN: AVISO IMPORTANTE ---
+with st.container():
+    st.warning("### ⚠️ Aviso Importante")
+    st.markdown("""
+    <div style="background-color: #fff9c4; padding: 15px; border-radius: 10px; border-left: 5px solid #fbc02d; color: #5d4037; font-weight: bold; text-align: justify;">
+    PARA MANTENER LA VERSIÓN GRATUITA DEBES ACABAR TUS INVITACIONES DISPONIBLES QUE SE ACREDITAN CADA MES, 
+    INVITA A MÁS USUARIOS QUE USEN LA APLICACIÓN, TE QUEDA UNA SEMANA PARA HACERLO, 
+    CASO CONTRARIO CAMBIA TU CUENTA A VERSIÓN PREMIUM PARA SALTAR ESTE PASO.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1: st.button("👑 TRANSFORMAR A PREMIUM", use_container_width=True)
+    with col_btn2: st.button("🎁 MANTENER VERSIÓN GRATUITA", use_container_width=True, type="primary")
+
+    inv = st.session_state.invitaciones_disponibles
+    st.subheader(f"Invitaciones pendientes: {inv}")
+    
+    col_inv1, col_inv2 = st.columns([3, 1])
+    with col_inv1:
+        email_inv = st.text_input("Correo del colega:", placeholder="ejemplo@correo.com", key="email_footer")
+    with col_inv2:
+        st.write(" ")
+        btn_enviar = st.button("Enviar Invitación Ahora", use_container_width=True)
+    
+    if btn_enviar:
+        if email_inv:
+            resp = conectar_api({"accion": "INVITAR", "usuario": st.session_state.usuario_actual, "invitado": email_inv})
+            if resp.get("exito"):
+                st.success("¡Invitación registrada exitosamente!")
+                st.session_state.invitaciones_disponibles -= 1
+                
+                # GENERACIÓN DE BOTÓN WHATSAPP DINÁMICO
+                msg_wa = urllib.parse.quote(f"🎁 Regalo Pase *RAPIDITO AI*.\n👤 Usuario: {email_inv}\n🔑 Clave: Rapidito2026\n👉 https://pruebas1998.streamlit.app")
+                st.markdown(f'''
+                    <a href="https://wa.me/?text={msg_wa}" target="_blank">
+                        <button style="background-color:#25D366;color:white;width:100%;font-weight:bold;padding:12px;border-radius:8px;border:none;cursor:pointer;">
+                            📲 ENVIAR POR WHATSAPP AHORA
+                        </button>
+                    </a>
+                ''', unsafe_allow_html=True)
+            else: st.error("No se pudo registrar la invitación.")
+        else: st.error("Ingresa un correo válido.")
+
+st.markdown("---")
+
+# --- SIDEBAR & TABS (Resto del código mantenido) ---
 with st.sidebar:
     st.header("⚙️ Panel de Control")
     if st.button("🧹 NUEVO INFORME", type="primary", use_container_width=True):
@@ -312,6 +336,15 @@ with st.sidebar:
         st.session_state.data_compras_cache, st.session_state.data_ventas_cache, st.session_state.sri_results = [], [], {}
         st.rerun()
     st.markdown("---")
+    if st.session_state.usuario_actual == "GABRIEL":
+        st.subheader("🔑 Master Config")
+        up_xls = st.file_uploader("Actualizar JSON", type=["xlsx"], key=f"mst_{st.session_state.id_proceso}")
+        if up_xls:
+            df = pd.read_excel(up_xls); df.columns = [c.upper().strip() for c in df.columns]
+            for _, r in df.iterrows():
+                nm = str(r.get("NOMBRE","")).upper().strip()
+                if nm: st.session_state.memoria["empresas"][nm] = {"DETALLE":str(r.get("DETALLE","OTROS")).upper(),"MEMO":str(r.get("MEMO","PROFESIONAL")).upper()}
+            guardar_memoria(); st.success("Guardado.")
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state.autenticado = False; st.rerun()
 
