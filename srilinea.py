@@ -65,7 +65,7 @@ if not st.session_state.autenticado:
 if not st.session_state.es_premium and st.session_state.invitaciones_disponibles > 0:
     st.title("🚧 ACCESO RESTRINGIDO")
     st.error(f"### Lo sentimos, {st.session_state.usuario_actual}")
-    st.markdown(f"Para desbloquear el sistema, debes agotar tus **{st.session_state.invitaciones_disponibles} invitaciones** mensuales o adquirir la versión Premium.")
+    st.markdown(f"Para desbloquear el sistema, debes agotar tus **{st.session_state.invitaciones_disponibles} invitaciones** mensuales o adquirir la versión Premium. Después de agotar tus invitaciones oprime F5 y vuelve a ingresar")
     
     col_w1, col_w2 = st.columns(2)
     
