@@ -160,21 +160,26 @@ def extraer_datos_robusto(xml_file):
             "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
             "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
             "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, "MEMO": memo_final,
-# Lógica de extracción de autorización
+# 1. Calculamos la autorización ANTES de definir el diccionario
         aut_ws = root.findtext(".//numeroAutorizacion")
         aut_cdata = buscar(["claveAcceso"])
         autorizacion_final = aut_ws if aut_ws else aut_cdata
 
+        # 2. Definimos el diccionario de forma limpia
         data = {
-            "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
-            "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
-            "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, 
+            "TIPO": tipo, 
+            "TIPO DE DOCUMENTO": tipo, 
+            "FECHA": fecha, 
+            "N. FACTURA": num_fact,
+            "RUC": ruc_emisor, 
+            "CONTRIBUYENTE": ruc_cli, 
+            "NOMBRE": razon_social,
+            "RUC CLIENTE": ruc_cli, 
+            "CLIENTE": nom_cli, 
+            "DETALLE": detalle_final, 
             "MEMO": memo_final,
-            "N AUTORIZACION": autorizacion_final # Ahora está correctamente dentro del diccionario
+            "N AUTORIZACION": autorizacion_final
         }
-        
-        # ... dentro del diccionario 'data':
-        "N AUTORIZACION": autorizacion_final
         
         if "/" in fecha:
             ms = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO","07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
