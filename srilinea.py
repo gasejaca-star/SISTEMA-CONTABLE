@@ -20,7 +20,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # Endpoints y Configuración
 URL_WS = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/AutorizacionComprobantesOffline?wsdl"
 HEADERS_WS = {"Content-Type": "text/xml;charset=UTF-8","User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
-URL_API_VIRAL = "https://script.google.com/macros/s/AKfycbzTqGeo2uygPVUYNfIk8MmCj9659sOON6di7ZkGDn6kQPw2z173c-EOaRUXaYV2udyB/exec" 
+URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVTDLXL-ZPNdfSEn9E1qRNKbz3dRzB9c7xN5uX_T0Fd5Q8/exec" 
 
 # --- FUNCIONES DE SOPORTE ---
 def conectar_api(payload):
@@ -30,7 +30,7 @@ def conectar_api(payload):
     except: return {"exito": False, "mensaje": "Error de conexión"}
 
 def registrar_actividad(usuario, accion, cantidad=None, sugerencia=None):
-    URL_LOGGING = "https://script.google.com/macros/s/AKfycbyk0CWehcUec47HTGMjqsCs0sTKa_9J3ZU_Su7aRxfwmNa76-dremthTuTPf-FswZY/exec"
+    URL_LOGGING = "https://script.google.com/macros/s/AKfycbwur1tNR80874Djv78LG1ed9ZwUOdJbaWC9Ctc39l3510zVSPs_ycntW4-lwo2UOLbm/exec"
     detalle = f"{accion} ({cantidad} XMLs)" if cantidad is not None else accion
     payload = {"usuario": str(usuario), "accion": str(detalle)}
     if sugerencia: payload["sugerencia"] = str(sugerencia)
@@ -57,6 +57,10 @@ if not st.session_state.autenticado:
             st.session_state.usuario_actual = u.strip()
             st.session_state.invitaciones_disponibles = resp.get("invitaciones", 0)
             st.session_state.es_premium = resp.get("premium", False)
+            
+            # ---> AQUÍ AGREGAMOS EL REGISTRO DE LA ACTIVIDAD DEL LOGIN <---
+            registrar_actividad(st.session_state.usuario_actual, "LOGIN EXITOSO")
+            
             st.rerun()
         else: st.sidebar.error("Credenciales incorrectas")
     st.stop()
@@ -91,7 +95,7 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
         st.subheader("👑 Versión Premium")
         with st.expander("💎 VER VALOR Y DATOS DE PAGO", expanded=True):
             st.markdown(f"""
-            ### 💰 Costo: $20 / Año
+            ### 💰 Costo: \$2.99 / MES        -----         \$20 / ANUAL
             **Transferencia Bancaria (Ecuador):**
             * **Banco:** Banco Pichincha (Ahorros) 2205082283
             * **Beneficiario:** Gabriel  Jácome 
@@ -156,8 +160,13 @@ def extraer_datos_robusto(xml_file):
             "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
             "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
             "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, "MEMO": memo_final,
-            "N AUTORIZACION": buscar(["numeroAutorizacion", "claveAcceso"])
-        }
+            # Buscamos primero en el XML principal (respuesta WS), luego en la infoTributaria del CDATA
+        aut_ws = root.findtext(".//numeroAutorizacion") # Autorización del WS
+        aut_cdata = buscar(["claveAcceso"])             # Clave interna del XML
+        autorizacion_final = aut_ws if aut_ws else aut_cdata
+        
+        # ... dentro del diccionario 'data':
+        "N AUTORIZACION": autorizacion_final
         
         if "/" in fecha:
             ms = {"01":"ENERO","02":"FEBRERO","03":"MARZO","04":"ABRIL","05":"MAYO","06":"JUNIO","07":"JULIO","08":"AGOSTO","09":"SEPTIEMBRE","10":"OCTUBRE","11":"NOVIEMBRE","12":"DICIEMBRE"}
@@ -244,7 +253,7 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
                 fmt_h = f_amar; sh_nm = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
-                cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori"]
+                cols = ["RUC CLIENTE", "CLIENTE", "fechaemi", "NOMBRE", "RUC", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "N AUTORIZACION"]
                 fmt_h = f_verd; sh_nm = "RETENCIONES"
             else:
                 cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
@@ -441,6 +450,8 @@ with tab_tutorial:
     st.subheader("🎥 Tutorial: Aprende a usar RAPIDITO AI")
     # st.video automáticamente carga el reproductor en grande dentro de la pestaña y permite darle play
     st.video("https://youtu.be/0iUAI3NAkww?si=aR-Xf9F-GeD1Kj1S")
+
+
 
 
 
