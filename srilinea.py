@@ -160,10 +160,18 @@ def extraer_datos_robusto(xml_file):
             "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
             "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
             "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, "MEMO": memo_final,
-            # Buscamos primero en el XML principal (respuesta WS), luego en la infoTributaria del CDATA
-        aut_ws = root.findtext(".//numeroAutorizacion") # Autorización del WS
-        aut_cdata = buscar(["claveAcceso"])             # Clave interna del XML
+# Lógica de extracción de autorización
+        aut_ws = root.findtext(".//numeroAutorizacion")
+        aut_cdata = buscar(["claveAcceso"])
         autorizacion_final = aut_ws if aut_ws else aut_cdata
+
+        data = {
+            "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
+            "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
+            "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, 
+            "MEMO": memo_final,
+            "N AUTORIZACION": autorizacion_final # Ahora está correctamente dentro del diccionario
+        }
         
         # ... dentro del diccionario 'data':
         "N AUTORIZACION": autorizacion_final
