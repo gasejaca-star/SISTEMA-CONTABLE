@@ -326,8 +326,16 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori"]
                 fmt_h = f_verd; sh_nm = "RETENCIONES"
             else:
-                cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
-                fmt_h = f_azul; sh_nm = "FACTURAS"
+                cols = [
+                    "ruc_recep", "nomrecep", "ruc_emisor", "razonsocial", "claveacceso", 
+                    "numautori", "fecautori", "numreten", "fechaemi", "dias_dif", 
+                    "periodo", "coddocum", "numdoc", "fecdocum", 
+                    "ivabase10", "ivaret10", "ivabase20", "ivaret20", 
+                    "ivabase30", "ivaret30", "ivabase70", "ivaret70", 
+                    "ivabase100", "ivaret100", 
+                    "ftecodret", "ftebase", "fteporcen", "ftevalret"
+                ]
+                fmt_h = f_verd; sh_nm = "RETENCIONES"
             
             for c in cols: 
                 if c not in df.columns: df[c] = ""
