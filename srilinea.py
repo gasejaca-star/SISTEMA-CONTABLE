@@ -407,6 +407,39 @@ with tab_xml:
                 st.download_button("📥 DESCARGAR INTEGRAL", generar_excel_multiexcel(st.session_state.data_compras_cache, st.session_state.data_ventas_cache), "Integral.xlsx")
             else: st.error("Falta procesar Compras y Ventas.")
             registrar_actividad(st.session_state.usuario_actual, "GENERÓ INFORME INTEGRAL")
+    with m4:
+        up_ret = st.file_uploader("Retenciones (XML/ZIP)", type=["xml","zip"], accept_multiple_files=True, key=f"ret_{st.session_state.id_proceso}")
+        st.info("💡 **Reporte de Retenciones:** Sube aquí tus comprobantes de retención (XML o ZIP). El sistema generará un reporte detallando RUC, facturas asociadas, base imponible y valores retenidos de IVA y Renta.")
+        
+        if up_ret and st.button("Generar Reporte Retenciones"):
+            raw_data = [extraer_datos_robusto(x) for x in procesar_archivos_entrada(up_ret)]
+            rets_data = [d for d in raw_data if d and d["TIPO"] == "RET"]
+            
+            if rets_data:
+                # Adaptamos las llaves del diccionario al formato exacto que espera generar_excel_multiexcel para sri_mode="RET"
+                formatted_rets = []
+                for d in rets_data:
+                    formatted_rets.append({
+                        "ruc_recep": d.get("CONTRIBUYENTE", ""),
+                        "nomrecep": d.get("CLIENTE", ""),
+                        "fechaemi": d.get("fechaemi", ""),
+                        "razonsocial": d.get("NOMBRE", ""),
+                        "ruc_emisor": d.get("RUC", ""),
+                        "numfact": d.get("numfact", ""),
+                        "numreten": d.get("numreten", ""),
+                        "baserenta": d.get("baserenta", 0.0),
+                        "rt_renta": d.get("rt_renta", 0.0),
+                        "baseiva": d.get("baseiva", 0.0),
+                        "rt_iva": d.get("rt_iva", 0.0),
+                        "numautori": d.get("N AUTORIZACION", "")
+                    })
+                
+                excel_ret = generar_excel_multiexcel(data_sri_lista=formatted_rets, sri_mode="RET")
+                st.success(f"¡Se procesaron {len(formatted_rets)} retenciones exitosamente!")
+                st.download_button("📥 Descargar Reporte Retenciones", excel_ret, "Reporte_Retenciones.xlsx")
+                registrar_actividad(st.session_state.usuario_actual, "PROCESÓ REPORTE RETENCIONES", len(formatted_rets))
+            else:
+                st.warning("No se encontraron comprobantes de retención válidos en los archivos subidos.")        
 
 with tab_sri:
     def bloque_sri_persistente(titulo, tipo_filtro, key):
