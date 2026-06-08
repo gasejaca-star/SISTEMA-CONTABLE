@@ -95,7 +95,7 @@ if not st.session_state.es_premium and st.session_state.invitaciones_disponibles
         st.subheader("👑 Versión Premium")
         with st.expander("💎 VER VALOR Y DATOS DE PAGO", expanded=True):
             st.markdown(f"""
-            ### 💰 Costo: \$2.99 / MES        -----          \$20 / ANUAL
+            ### 💰 Costo: \$2.99 / MES        -----         \$20 / ANUAL
             **Transferencia Bancaria (Ecuador):**
             * **Banco:** Banco Pichincha (Ahorros) 2205082283
             * **Beneficiario:** Gabriel  Jácome 
@@ -156,25 +156,11 @@ def extraer_datos_robusto(xml_file):
             detalle_final = info_json["DETALLE"] if info_json else "OTROS"
             memo_final = info_json["MEMO"] if info_json else "PROFESIONAL"
 
-        # 1. Calculamos la autorización ANTES de definir el diccionario
-        aut_ws = root.findtext(".//numeroAutorizacion")
-        aut_cdata = buscar(["claveAcceso"])
-        autorizacion_final = aut_ws if aut_ws else aut_cdata
-
-        # 2. Definimos el diccionario de forma limpia
         data = {
-            "TIPO": tipo, 
-            "TIPO DE DOCUMENTO": tipo, 
-            "FECHA": fecha, 
-            "N. FACTURA": num_fact,
-            "RUC": ruc_emisor, 
-            "CONTRIBUYENTE": ruc_cli, 
-            "NOMBRE": razon_social,
-            "RUC CLIENTE": ruc_cli, 
-            "CLIENTE": nom_cli, 
-            "DETALLE": detalle_final, 
-            "MEMO": memo_final,
-            "N AUTORIZACION": autorizacion_final
+            "TIPO": tipo, "TIPO DE DOCUMENTO": tipo, "FECHA": fecha, "N. FACTURA": num_fact,
+            "RUC": ruc_emisor, "CONTRIBUYENTE": ruc_cli, "NOMBRE": razon_social,
+            "RUC CLIENTE": ruc_cli, "CLIENTE": nom_cli, "DETALLE": detalle_final, "MEMO": memo_final,
+            "N AUTORIZACION": buscar(["numeroAutorizacion", "claveAcceso"])
         }
         
         if "/" in fecha:
@@ -262,7 +248,7 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
                 fmt_h = f_amar; sh_nm = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
-                cols = ["RUC CLIENTE", "CLIENTE", "fechaemi", "NOMBRE", "RUC", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "N AUTORIZACION"]
+                cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori"]
                 fmt_h = f_verd; sh_nm = "RETENCIONES"
             else:
                 cols = ["MES","FECHA","N. FACTURA","TIPO DE DOCUMENTO","RUC","CONTRIBUYENTE","NOMBRE","DETALLE","MEMO","OTRA BASE IVA","OTRO IVA","MONTO ICE","PROPINAS","EXENTO DE IVA","NO OBJ IVA","BASE. 0","BASE. 12 / 15","IVA.","TOTAL","SUBDETALLE"]
@@ -395,6 +381,7 @@ with tab_xml:
     m1, m2, m3 = st.tabs(["🛒 Compras y NC", "💰 Ventas y Retenciones", "📑 Informe Integral"])
     with m1:
         up = st.file_uploader("Compras (XML/ZIP)", type=["xml","zip"], accept_multiple_files=True, key=f"c_{st.session_state.id_proceso}")
+        # --- NUEVA LÍNEA DE DESCRIPCIÓN ---
         st.info("💡 **Módulo de Compras:** Sube tus facturas recibidas y notas de crédito en formato xml o zip con xmls.  Este reporte contiene la pestaña de compras y gasto anual. El sistema clasificará automáticamente tus gastos deducibles.")
         if up and st.button("Procesar Compras"):
             data = [extraer_datos_robusto(x) for x in procesar_archivos_entrada(up)]
@@ -404,6 +391,7 @@ with tab_xml:
             st.download_button("📥 Excel Compras", generar_excel_multiexcel(data_compras=data), "Compras.xlsx")
     with m2:
         up = st.file_uploader("Ventas (XML/ZIP)", type=["xml","zip"], accept_multiple_files=True, key=f"v_{st.session_state.id_proceso}")
+        # --- NUEVA LÍNEA DE DESCRIPCIÓN ---
         st.info("💡 **Módulo de Ventas:** Carga tus facturas emitidas y retenciones recibidas en formato xml o zip con xmls. El sistema cruzará la información usando los números de sustento.")
         if up and st.button("Procesar Ventas"):
             raw = [extraer_datos_robusto(x) for x in procesar_archivos_entrada(up)]
@@ -412,6 +400,7 @@ with tab_xml:
             registrar_actividad(st.session_state.usuario_actual, "PROCESÓ VENTAS MANUAL", len(data))
             st.download_button("📥 Excel Ventas", generar_excel_multiexcel(data_ventas_ret=data), "Ventas.xlsx")
     with m3:
+        # --- NUEVA LÍNEA DE DESCRIPCIÓN ---
         st.info("💡 **Informe Integral:** Consumo de datos cruzados. Este reporte contiene la pestaña de compras, reporte anual, ventas y proyección. Asegúrate de haber presionado primero el botón de procesar compras y ventas de las dos anteriores pestañas en orden para generar el reporte anual completo.")
         if st.button("🚀 Generar Informe Integral"):
             if st.session_state.data_compras_cache and st.session_state.data_ventas_cache:
@@ -422,6 +411,7 @@ with tab_xml:
 with tab_sri:
     def bloque_sri_persistente(titulo, tipo_filtro, key):
         st.subheader(titulo); up = st.file_uploader(f"TXT {titulo}", type=["txt"], key=f"up_{key}")
+        # --- NUEVA LÍNEA DE DESCRIPCIÓN ---
         st.info(f"👉 Sube el archivo TXT descargado del portal del SRI para extraer masivamente los XMLs de {titulo}.")
         if up and st.button(f"🚀 Descargar {titulo}", key=f"btn_{key}"):
             claves = list(dict.fromkeys(re.findall(r'\d{49}', up.read().decode("latin-1"))))
@@ -453,4 +443,12 @@ with tab_sri:
 # AQUI SE CONFIGURA LA NUEVA PESTAÑA CON EL VIDEO DE YOUTUBE
 with tab_tutorial:
     st.subheader("🎥 Tutorial: Aprende a usar RAPIDITO AI")
+    # st.video automáticamente carga el reproductor en grande dentro de la pestaña y permite darle play
     st.video("https://youtu.be/0iUAI3NAkww?si=aR-Xf9F-GeD1Kj1S")
+
+
+
+
+
+
+
