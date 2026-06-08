@@ -378,7 +378,7 @@ if inv > 0:
 tab_xml, tab_sri, tab_tutorial = st.tabs(["📂 Subir XMLs (Manual/ZIP)", "📡 Descarga SRI (TXT)", "📺 Aprende a usarme"])
 
 with tab_xml:
-    m1, m2, m3 = st.tabs(["🛒 Compras y NC", "💰 Ventas y Retenciones", "📑 Informe Integral"])
+    m1, m2, m3, m4 = st.tabs(["🛒 Compras y NC", "💰 Ventas y Retenciones", "📑 Informe Integral", "📑 Reporte de Retenciones"])
     with m1:
         up = st.file_uploader("Compras (XML/ZIP)", type=["xml","zip"], accept_multiple_files=True, key=f"c_{st.session_state.id_proceso}")
         # --- NUEVA LÍNEA DE DESCRIPCIÓN ---
