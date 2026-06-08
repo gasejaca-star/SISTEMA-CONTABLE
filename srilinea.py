@@ -23,6 +23,20 @@ HEADERS_WS = {"Content-Type": "text/xml;charset=UTF-8","User-Agent": "Mozilla/5.
 URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVTDLXL-ZPNdfSEn9E1qRNKbz3dRzB9c7xN5uX_T0Fd5Q8/exec" 
 
 # --- FUNCIONES DE SOPORTE ---
+def to_date(fecha_str):
+    if not fecha_str: return None
+    for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+        try: return datetime.strptime(fecha_str.strip(), fmt)
+        except: pass
+    return None
+
+def norm_fecha(fecha_str):
+    return fecha_str.strip() if fecha_str else ""
+    
+def norm_periodo(periodo_str):
+    if not periodo_str: return ""
+    # Si viene MM/YYYY, lo mantiene limpio
+    return periodo_str.strip()
 def conectar_api(payload):
     try:
         r = requests.post(URL_API_VIRAL, json=payload, timeout=10)
@@ -179,6 +193,8 @@ def extraer_datos_robusto(xml_file):
             cod_doc_sustento = ""
             num_doc_sustento = ""
             fec_doc_sustento = ""
+            f_norm = fecha  # Asignamos la fecha encontrada
+            fec_autori = buscar(["fechaAutorizacion"]) or fecha
 
             for item in (xml_data.findall(".//impuesto") + xml_data.findall(".//retencion")):
                 try:
