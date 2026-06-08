@@ -323,9 +323,6 @@ def generar_excel_multiexcel(data_compras=None, data_ventas_ret=None, data_sri_l
                 cols = ["NOMBRE","RUC","N AUTORIZACION","FECHA","TIPO DE DOCUMENTO","N. FACTURA","MES","RUC CLIENTE","CLIENTE","PROPINAS","BASE. 0","NO OBJ IVA","BASE. 12 / 15","IVA.","TOTAL"]
                 fmt_h = f_amar; sh_nm = "NOTAS DE CREDITO"
             elif sri_mode == "RET":
-                cols = ["ruc_recep", "nomrecep", "fechaemi", "razonsocial", "ruc_emisor", "numfact", "numreten", "baserenta", "rt_renta", "baseiva", "rt_iva", "numautori"]
-                fmt_h = f_verd; sh_nm = "RETENCIONES"
-            else:
                 cols = [
                     "ruc_recep", "nomrecep", "ruc_emisor", "razonsocial", "claveacceso", 
                     "numautori", "fecautori", "numreten", "fechaemi", "dias_dif", 
