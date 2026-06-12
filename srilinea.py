@@ -25,20 +25,14 @@ URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVT
 # --- FUNCIONES DE SOPORTE ---
 def obtener_ip_usuario():
     try:
-        # Intentamos obtener la IP a través de las cabeceras de Streamlit
-        headers = st.context.headers
-        
-        # Primero probamos X-Forwarded-For (común en despliegues en la nube)
-        if "X-Forwarded-For" in headers:
-            return headers["X-Forwarded-For"].split(",")[0].strip()
-        
-        # Alternativa: ver si la IP viene en la cabecera 'Remote-Addr'
-        if "Remote-Addr" in headers:
-            return headers["Remote-Addr"]
-            
-        return "IP_Privada_o_Local"
-    except Exception as e:
-        return f"Error: {str(e)}"
+        # Consultamos a ipify, un servicio gratuito y muy rápido para saber tu IP pública
+        r = requests.get('https://api.ipify.org?format=json', timeout=5)
+        if r.status_code == 200:
+            return r.json()['ip']
+        else:
+            return "No detectada"
+    except Exception:
+        return "Error en API IP"
 def to_date(fecha_str):
     if not fecha_str: return None
     for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
