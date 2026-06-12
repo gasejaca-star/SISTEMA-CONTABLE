@@ -23,6 +23,20 @@ HEADERS_WS = {"Content-Type": "text/xml;charset=UTF-8","User-Agent": "Mozilla/5.
 URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVTDLXL-ZPNdfSEn9E1qRNKbz3dRzB9c7xN5uX_T0Fd5Q8/exec" 
 
 # --- FUNCIONES DE SOPORTE ---
+def obtener_ip_usuario():
+    try:
+        # En versiones recientes de Streamlit, podemos leer las cabeceras directamente
+        headers = st.context.headers
+        
+        # Los servidores en la nube (como Streamlit Community Cloud o Heroku) 
+        # guardan la IP real del cliente en 'X-Forwarded-For'
+        if "X-Forwarded-For" in headers:
+            ip = headers["X-Forwarded-For"].split(",")[0].strip()
+        else:
+            ip = "IP no detectada"
+        return ip
+    except Exception:
+        return "Error al leer IP"
 def to_date(fecha_str):
     if not fecha_str: return None
     for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
