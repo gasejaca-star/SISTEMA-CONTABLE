@@ -24,13 +24,12 @@ URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVT
 
 # --- FUNCIONES DE SOPORTE ---
 def obtener_ip_usuario():
+    
     try:
-        # Consultamos a ipify, un servicio gratuito y muy rápido para saber tu IP pública
-        r = requests.get('https://api.ipify.org?format=json', timeout=5)
-        if r.status_code == 200:
-            return r.json()['ip']
-        else:
-            return "No detectada"
+    test_ip = requests.get('https://api.ipify.org', timeout=5).text
+    st.sidebar.write(f"DEBUG IP: {test_ip}")
+        except Exception as e:
+    st.sidebar.write(f"DEBUG ERROR: {e}")
     except Exception:
         return "Error en API IP"
 def to_date(fecha_str):
