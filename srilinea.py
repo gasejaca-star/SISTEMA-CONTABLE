@@ -24,13 +24,16 @@ URL_API_VIRAL = "https://script.google.com/macros/s/AKfycby34vXKtymcy2zt3I8DXHVT
 
 # --- FUNCIONES DE SOPORTE ---
 def obtener_ip_usuario():
-    
     try:
-    test_ip = requests.get('https://api.ipify.org', timeout=5).text
-    st.sidebar.write(f"DEBUG IP: {test_ip}")
-        except Exception as e:
-    st.sidebar.write(f"DEBUG ERROR: {e}")
-    except Exception:
+        # Intentamos obtener la IP externa
+        test_ip = requests.get('https://api.ipify.org', timeout=5).text
+        # Si quieres verla en la barra lateral mientras pruebas:
+        st.sidebar.write(f"DEBUG IP: {test_ip}")
+        return test_ip
+        
+    except Exception as e:
+        # Si falla, mostramos el error en la barra lateral y retornamos un mensaje
+        st.sidebar.write(f"DEBUG ERROR: {e}")
         return "Error en API IP"
 def to_date(fecha_str):
     if not fecha_str: return None
